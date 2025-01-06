@@ -55,4 +55,9 @@ static inline void outl(uint16_t port, uint32_t value) {
        : "a"(value), "d"(port)
    );
 }
+
+static inline void io_wait(void) {
+    outb(0x80, 0);
+}
+
 #endif

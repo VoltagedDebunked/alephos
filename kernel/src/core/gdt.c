@@ -1,8 +1,11 @@
 #include <core/gdt.h>
 
-#if defined(ARCH_X64) || defined(ARCH_X86)
-static struct gdt_entry gdt_entries[5];
+static struct gdt_entry gdt_entries[7];
 static struct gdt_ptr gdt_pointer __attribute__((aligned(16)));
+static struct tss tss __attribute__((aligned(16)));
+
+// External assembly function to load GDT and TSS
+extern void gdt_flush(uint64_t gdt_ptr);
 
 static void gdt_set_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran) {
     gdt_entries[num].base_low = base & 0xFFFF;
@@ -12,76 +15,74 @@ static void gdt_set_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t acc
     gdt_entries[num].granularity = ((limit >> 16) & 0x0F) | (gran & 0xF0);
     gdt_entries[num].access = access;
 }
-#endif
+
+static void gdt_set_tss(uint32_t num, uint64_t base, uint32_t limit) {
+    struct gdt_tss_entry* tss_entry = (struct gdt_tss_entry*)&gdt_entries[num];
+    
+    // Set base address
+    tss_entry->base_low = base & 0xFFFF;
+    tss_entry->base_middle = (base >> 16) & 0xFF;
+    tss_entry->base_high = (base >> 24) & 0xFF;
+    tss_entry->base_upper = (base >> 32) & 0xFFFFFFFF;
+    
+    // Set limit
+    tss_entry->length = limit;
+    
+    // Set flags
+    tss_entry->flags = 0x89;        // Present, DPL=0, Type=TSS Available
+    tss_entry->granularity = 0x0;   // No granularity for TSS
+    
+    tss_entry->reserved = 0;
+}
 
 void gdt_init(void) {
-#if defined(ARCH_X64)
-    gdt_pointer.limit = (sizeof(struct gdt_entry) * 5) - 1;
+    // Setup GDT pointer
+    gdt_pointer.limit = (sizeof(struct gdt_entry) * 7) - 1;
     gdt_pointer.base = (uint64_t)&gdt_entries;
 
+    // Initialize TSS
+    for (int i = 0; i < sizeof(tss); i++) {
+        ((uint8_t*)&tss)[i] = 0;
+    }
+    
+    // Set up stack pointers in TSS
+    // RSP0 is set later via gdt_load_tss
+    tss.ist1 = 0x50000;  // Debug stack
+    tss.ist2 = 0x51000;  // NMI stack
+    tss.ist3 = 0x52000;  // Double fault stack
+    tss.ist4 = 0x53000;  // General stack for interrupts
+    tss.iopb_offset = sizeof(tss);  // No I/O permission bitmap
+
+    // NULL descriptor
     gdt_set_gate(0, 0, 0, 0, 0);
-    gdt_set_gate(1, 0, 0xFFFFFFFF, 0x9A, 0xAF);
-    gdt_set_gate(2, 0, 0xFFFFFFFF, 0x92, 0xCF);
-    gdt_set_gate(3, 0, 0xFFFFFFFF, 0xFA, 0xAF);
-    gdt_set_gate(4, 0, 0xFFFFFFFF, 0xF2, 0xCF);
 
-    asm volatile (
-        "lgdt %0\n"
-        "push 0x08\n"
-        "lea rax, [rip + 1f]\n"
-        "push rax\n"
-        "retfq\n"
-        "1:\n"
-        "mov ax, 0x10\n"
-        "mov ds, ax\n"
-        "mov es, ax\n"
-        "mov fs, ax\n"
-        "mov gs, ax\n"
-        "mov ss, ax"
-        :: "m"(gdt_pointer)
-        : "memory", "rax"
-    );
+    // Kernel mode code segment
+    gdt_set_gate(1, 0, 0xFFFFFFFF,
+        GDT_PRESENT | GDT_DESCRIPTOR | GDT_EXECUTABLE | GDT_READWRITE,
+        GDT_GRANULARITY | GDT_SIZE_64);
 
-#elif defined(ARCH_X86)
-    gdt_pointer.limit = (sizeof(struct gdt_entry) * 5) - 1;
-    gdt_pointer.base = (uint32_t)&gdt_entries;
+    // Kernel mode data segment
+    gdt_set_gate(2, 0, 0xFFFFFFFF,
+        GDT_PRESENT | GDT_DESCRIPTOR | GDT_READWRITE,
+        GDT_GRANULARITY | GDT_SIZE_64);
 
-    gdt_set_gate(0, 0, 0, 0, 0);
-    gdt_set_gate(1, 0, 0xFFFFFFFF, 0x9A, 0xCF);
-    gdt_set_gate(2, 0, 0xFFFFFFFF, 0x92, 0xCF);
-    gdt_set_gate(3, 0, 0xFFFFFFFF, 0xFA, 0xCF);
-    gdt_set_gate(4, 0, 0xFFFFFFFF, 0xF2, 0xCF);
+    // User mode code segment
+    gdt_set_gate(3, 0, 0xFFFFFFFF,
+        GDT_PRESENT | GDT_DPL_RING3 | GDT_DESCRIPTOR | GDT_EXECUTABLE | GDT_READWRITE,
+        GDT_GRANULARITY | GDT_SIZE_64);
 
-    asm volatile (
-        "lgdt %0\n"
-        "mov ax, 0x10\n"
-        "mov ds, ax\n"
-        "mov es, ax\n"
-        "mov fs, ax\n"
-        "mov gs, ax\n"
-        "mov ss, ax\n"
-        "jmp 0x08:.flush\n"
-        ".flush:\n"
-        "ret"
-        :: "m"(gdt_pointer)
-        : "memory", "ax"
-    );
+    // User mode data segment
+    gdt_set_gate(4, 0, 0xFFFFFFFF,
+        GDT_PRESENT | GDT_DPL_RING3 | GDT_DESCRIPTOR | GDT_READWRITE,
+        GDT_GRANULARITY | GDT_SIZE_64);
 
-#elif defined(ARCH_ARM64)
-    asm volatile (
-        "msr ttbr0_el1, %0\n"
-        "dsb sy\n"
-        "isb"
-        :: "r"(0)
-        : "memory"
-    );
+    // TSS entries (we need two entries for x86_64 TSS)
+    gdt_set_tss(5, (uint64_t)&tss, sizeof(tss));
 
-#elif defined(ARCH_RISCV64)
-    asm volatile (
-        "csrw satp, %0\n"
-        "sfence.vma"
-        :: "r"(0)
-        : "memory"
-    );
-#endif
+    // Load GDT and TSS
+    gdt_flush((uint64_t)&gdt_pointer);
+}
+
+void gdt_load_tss(uint64_t rsp0) {
+    tss.rsp0 = rsp0;
 }
