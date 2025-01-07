@@ -21,6 +21,9 @@
 #include <core/gdt.h>
 #include <core/idt.h>
 
+// Memory, yes this is the part that REALLY fucked me over.
+#include <mm/pmm.h>
+
 // Stack definitions
 #define STACK_SIZE 16384 // 16 KB for each stack
 
@@ -140,7 +143,12 @@ void kmain(void) {
     sti();
     
     draw_string(global_framebuffer, "[ INFO ] Interrupts Enabled.", 0, 80, WHITE);
-    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 100, GREEN);
+
+    pmm_init(memmap_request.response);
+
+    draw_string(global_framebuffer, "[ INFO ] PMM Initialized.", 0, 100, WHITE);
+
+    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 120, GREEN);
 
     // Main kernel loop
     while (1) {

@@ -2,7 +2,7 @@
 section .text
 
 ; External C handler
-extern exception_handler_common  ; Changed from exception_handler to exception_handler_common
+extern exception_handler_common
 
 ; Export the ISR stub table
 global isr_stub_table
