@@ -24,9 +24,12 @@
 #define KERNEL_VIRT_BASE     0xFFFFFFFF80000000ULL
 #define KERNEL_PHYS_BASE     0x0000000000100000ULL
 
+// Function declarations
 void vmm_init(void);
 bool vmm_map_page(uint64_t virt, uint64_t phys, uint64_t flags);
+bool vmm_unmap_page(uint64_t virt);
 void vmm_switch_pagemap(uint64_t pml4_phys);
 uint64_t vmm_get_cr3(void);
+uint64_t vmm_get_phys_addr(uint64_t virt);
 
 #endif
