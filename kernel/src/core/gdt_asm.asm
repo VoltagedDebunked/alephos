@@ -1,4 +1,4 @@
-[BITS 64]
+bits 64
 section .text
 
 global gdt_flush
@@ -13,7 +13,8 @@ gdt_flush:
     push    0x08                ; Kernel code segment selector
     lea     rax, [rel .reload_cs] ; Get address of reload_cs
     push    rax
-    retfq                       ; Far return to reload CS
+    db 0x48                    ; REX prefix for 64-bit operand
+    retf                       ; Far return to reload CS
 .reload_cs:
     ; Reload data segment registers
     mov     ax, 0x10           ; Kernel data segment selector

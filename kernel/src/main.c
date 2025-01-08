@@ -23,6 +23,7 @@
 
 // Memory, yes this is the part that REALLY fucked me over.
 #include <mm/pmm.h>
+#include <mm/vmm.h>
 
 // Stack definitions
 #define STACK_SIZE 16384 // 16 KB for each stack
@@ -38,7 +39,7 @@ static uint8_t ist6_stack[STACK_SIZE] __attribute__((aligned(16))); // GPF
 static uint8_t ist7_stack[STACK_SIZE] __attribute__((aligned(16))); // General interrupts
 
 // Global framebuffer pointer for exception handler
-static struct limine_framebuffer* global_framebuffer;
+struct limine_framebuffer* global_framebuffer;
 
 // Function to get the top of a stack (stack grows downward on x86)
 static inline uint64_t stack_top(uint8_t* stack) {
@@ -148,13 +149,15 @@ void kmain(void) {
 
     draw_string(global_framebuffer, "[ INFO ] PMM Initialized.", 0, 100, WHITE);
 
-    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 120, GREEN);
+    vmm_init();
+
+    draw_string(global_framebuffer, "[ INFO ] VMM Initialized.", 0, 120, WHITE);
+
+    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 140, GREEN);
 
     // Main kernel loop
-    while (1) {
-        hlt();
-    }
+    while (1) {}
 
-    // Should never reach here
+    // Should never reach here, AND IF IT DOES. were fucked.
     hcf();
 }

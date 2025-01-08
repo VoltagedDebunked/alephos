@@ -11,7 +11,7 @@
 #define MAGENTA        0xFF00FF
 #define CYAN           0x00FFFF
 
-// Neutral tones
+// Neutral tones (mmm yummy metal)
 #define GRAY           0x808080
 #define LIGHT_GRAY     0xD3D3D3
 #define DARK_GRAY      0x404040

@@ -9,7 +9,7 @@ void check_fb() {
        hcf();
    }
 
-   // Ensure we got a framebuffer or else we're in trouble.
+   // Ensure we got a framebuffer or else we're fucked.
    if (framebuffer_request.response == NULL
        || framebuffer_request.response->framebuffer_count < 1) {
        hcf();
