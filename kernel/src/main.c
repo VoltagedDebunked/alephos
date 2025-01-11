@@ -35,6 +35,10 @@
 #include <core/drivers/usb/keyboard.h>
 #include <core/drivers/ioapic.h>
 #include <core/drivers/lapic.h>
+#include <core/drivers/ip.h>
+
+// Net
+#include <net/net.h>
 
 // Stack definitions
 #define STACK_SIZE 16384 // 16 KB for each stack
@@ -193,7 +197,15 @@ void kmain(void) {
 
     draw_string(global_framebuffer, "[ INFO ] LAPIC Initialized and Enabled.", 0, 260, WHITE);
 
-    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 280, GREEN);
+    ip_init();
+
+    draw_string(global_framebuffer, "[ INFO ] IP Driver Initialized.", 0, 280, WHITE);
+
+    net_init();
+
+    draw_string(global_framebuffer, "[ INFO ] Networking Initialized.", 0, 300, WHITE);
+
+    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 320, GREEN);
 
     // Main kernel loop
     while (1) {}
