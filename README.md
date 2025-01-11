@@ -20,18 +20,32 @@
 - [x] PMM
 - [x] VMM
 - [x] PIC Driver
-- [x] Framebuffer
-- [x] Text Rendering
 - [ ] LAPIC
 - [ ] IOAPIC
 - [ ] Ring 3
 - [ ] Syscalls
 - [ ] VFS
 - [ ] FS
-- [ ] USB Drivers
-- [ ] PS2 Drivers
+- [x] Framebuffer
+- [x] Text Rendering
+- [ ] USB Keyboard Driver
+- [x] PS/2 Keyboard Driver
+- [ ] USB Mouse Driver
+- [ ] PS/2 Mouse Driver
 - [ ] Ported Apps
-  
+- [ ] TCP/IP Stack
+- [ ] Ported Standard C Library
+- [ ] ELF Loading and execution
+- [ ] HTTPS Support
+- [ ] Browser Port (Minimal)
+- [ ] DOOM Port
+- [ ] SMP
+- [ ] ACPI
+- [ ] NVMe Support
+- [ ] HDD Support
+
+That's all for now, maybe i'll expand it later, or complete more stuff.
+
 ## License
 
 Licensed under [MPL-2.0](LICENSE)

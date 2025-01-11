@@ -25,6 +25,10 @@
 #include <mm/pmm.h>
 #include <mm/vmm.h>
 
+// Drivers
+#include <core/drivers/ps2/keyboard.h>
+#include <core/drivers/pic.h>
+
 // Stack definitions
 #define STACK_SIZE 16384 // 16 KB for each stack
 
@@ -96,18 +100,18 @@ void general_exception_handler(struct interrupt_frame_error* frame) {
 void kmain(void) {
     // Disable interrupts until we're fully initialized
     cli();
-    
+
     // Initialize framebuffer first for debug output
     fb_init();
     global_framebuffer = framebuffer_request.response->framebuffers[0];
     draw_string(global_framebuffer, "[ INFO ] Framebuffer Initialized.", 0, 0, WHITE);
-    
+
     check_fb();
     draw_string(global_framebuffer, "[ STATUS ] Framebuffer Checked: Framebuffer state is good.", 0, 20, WHITE);
 
     // Initialize GDT with proper stacks
     gdt_init();
-    
+
     // Set up TSS stacks
     gdt_load_tss(stack_top(kernel_stack)); // RSP0 - Kernel stack for privilege changes
 
@@ -139,10 +143,10 @@ void kmain(void) {
     }
 
     draw_string(global_framebuffer, "[ INFO ] IDT Initialized.", 0, 60, WHITE);
-    
+
     // Enable interrupts
     sti();
-    
+
     draw_string(global_framebuffer, "[ INFO ] Interrupts Enabled.", 0, 80, WHITE);
 
     pmm_init(memmap_request.response);
@@ -153,7 +157,15 @@ void kmain(void) {
 
     draw_string(global_framebuffer, "[ INFO ] VMM Initialized.", 0, 120, WHITE);
 
-    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 140, GREEN);
+    pic_init();
+
+    draw_string(global_framebuffer, "[ INFO ] PIC Initialized.", 0, 140, WHITE);
+
+    keyboard_init();
+
+    draw_string(global_framebuffer, "[ INFO ] Keyboard Initialized.", 0, 160, WHITE);
+
+    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 180, GREEN);
 
     // Main kernel loop
     while (1) {}
