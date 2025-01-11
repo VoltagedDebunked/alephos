@@ -42,7 +42,7 @@
 - [ ] Browser Port (Minimal)
 - [ ] DOOM Port
 - [ ] SMP
-- [ ] ACPI
+- [x] ACPI
 - [ ] NVMe Support
 - [ ] HDD Support
 
