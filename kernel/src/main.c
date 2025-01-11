@@ -34,6 +34,7 @@
 #include <core/drivers/usb/xhci.h>
 #include <core/drivers/usb/keyboard.h>
 #include <core/drivers/ioapic.h>
+#include <core/drivers/lapic.h>
 
 // Stack definitions
 #define STACK_SIZE 16384 // 16 KB for each stack
@@ -187,7 +188,12 @@ void kmain(void) {
 
     draw_string(global_framebuffer, "[ INFO ] I/O APIC Initialized.", 0, 240, WHITE);
 
-    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 260, GREEN);
+    lapic_init();
+    lapic_enable();
+
+    draw_string(global_framebuffer, "[ INFO ] LAPIC Initialized and Enabled.", 0, 260, WHITE);
+
+    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 280, GREEN);
 
     // Main kernel loop
     while (1) {}

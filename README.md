@@ -20,7 +20,7 @@
 - [x] PMM
 - [x] VMM
 - [x] PIC Driver
-- [ ] LAPIC
+- [x] LAPIC
 - [x] IOAPIC
 - [ ] Ring 3
 - [ ] Syscalls
