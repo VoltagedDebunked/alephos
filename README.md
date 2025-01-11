@@ -35,7 +35,7 @@
 - [ ] USB Mouse Driver
 - [ ] PS/2 Mouse Driver
 - [ ] Ported Apps
-- [ ] TCP/IP Stack
+- [x] TCP/IP Stack
 - [ ] Ported Standard C Library
 - [ ] ELF Loading and execution
 - [ ] HTTPS Support
