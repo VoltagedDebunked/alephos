@@ -20,6 +20,7 @@
 // Core
 #include <core/gdt.h>
 #include <core/idt.h>
+#include <core/acpi.h>
 
 // Memory, yes this is the part that REALLY fucked me over.
 #include <mm/pmm.h>
@@ -28,6 +29,11 @@
 // Drivers
 #include <core/drivers/ps2/keyboard.h>
 #include <core/drivers/pic.h>
+#include <core/drivers/pci.h>
+#include <core/drivers/usb/usb.h>
+#include <core/drivers/usb/xhci.h>
+#include <core/drivers/usb/keyboard.h>
+#include <core/drivers/ioapic.h>
 
 // Stack definitions
 #define STACK_SIZE 16384 // 16 KB for each stack
@@ -165,11 +171,28 @@ void kmain(void) {
 
     draw_string(global_framebuffer, "[ INFO ] Keyboard Initialized.", 0, 160, WHITE);
 
-    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 180, GREEN);
+    acpi_init();
+
+    draw_string(global_framebuffer, "[ INFO ] ACPI Initialized.", 0, 180, WHITE);
+
+    pci_init();
+
+    draw_string(global_framebuffer, "[ INFO ] PCI Initialized.", 0, 200, WHITE);
+
+    usb_keyboard_init();
+
+    draw_string(global_framebuffer, "[ INFO ] USB Support Initialized.", 0, 220, WHITE);
+
+    ioapic_init();
+
+    draw_string(global_framebuffer, "[ INFO ] I/O APIC Initialized.", 0, 240, WHITE);
+
+    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 260, GREEN);
 
     // Main kernel loop
     while (1) {}
 
-    // Should never reach here, AND IF IT DOES. were fucked.
+    // If this stupid little compiler fucks with this infrastructure
+    // by "optimizing it" and making it reach here, im gonna crash out.
     hcf();
 }

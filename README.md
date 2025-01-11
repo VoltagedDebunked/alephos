@@ -21,15 +21,17 @@
 - [x] VMM
 - [x] PIC Driver
 - [ ] LAPIC
-- [ ] IOAPIC
+- [x] IOAPIC
 - [ ] Ring 3
 - [ ] Syscalls
 - [ ] VFS
 - [ ] FS
 - [x] Framebuffer
 - [x] Text Rendering
-- [ ] USB Keyboard Driver
+- [x] USB Keyboard Driver
 - [x] PS/2 Keyboard Driver
+- [x] PCI
+- [x] xHCI
 - [ ] USB Mouse Driver
 - [ ] PS/2 Mouse Driver
 - [ ] Ported Apps

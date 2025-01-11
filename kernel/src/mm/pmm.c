@@ -50,7 +50,7 @@ void pmm_init(struct limine_memmap_response *memmap) {
             bitmap = phys_to_virt((void*)entry->base);
             // Mark all pages as used initially
             memset(bitmap, 0xFF, bitmap_size * sizeof(BITMAP_ENTRY));
-            
+
             entry->base += required_size;
             entry->length -= required_size;
             break;
@@ -93,40 +93,6 @@ void *pmm_alloc_page(void) {
                 bitmap_set(page);
                 free_pages--;
                 return (void*)(page * PAGE_SIZE);
-            }
-        }
-    }
-    
-    return NULL;
-}
-
-void *pmm_alloc_pages(size_t count) {
-    if (count == 0 || count > free_pages) return NULL;
-    if (count == 1) return pmm_alloc_page();
-
-    // Start from entry 1 to avoid low pages
-    for (uint64_t idx = 1; idx < bitmap_size; idx++) {
-        uint64_t consecutive = 0;
-        uint64_t start_bit = 0;
-
-        for (uint64_t bit = 0; bit < BITS_PER_ENTRY; bit++) {
-            uint64_t page = idx * BITS_PER_ENTRY + bit;
-            
-            if (page >= total_pages) return NULL;
-
-            if (!bitmap_test(page)) {
-                if (consecutive == 0) start_bit = bit;
-                consecutive++;
-                if (consecutive == count) {
-                    // Found enough consecutive pages
-                    for (uint64_t i = 0; i < count; i++) {
-                        bitmap_set(idx * BITS_PER_ENTRY + start_bit + i);
-                    }
-                    free_pages -= count;
-                    return (void*)((idx * BITS_PER_ENTRY + start_bit) * PAGE_SIZE);
-                }
-            } else {
-                consecutive = 0;
             }
         }
     }
