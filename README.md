@@ -26,6 +26,7 @@
 - [ ] Syscalls
 - [ ] VFS
 - [ ] FS
+- [x] Heap
 - [x] Framebuffer
 - [x] Text Rendering
 - [x] USB Keyboard Driver
@@ -45,7 +46,7 @@
 - [ ] DOOM Port
 - [ ] SMP
 - [x] ACPI
-- [ ] NVMe Support
+- [x] NVMe Support
 - [ ] HDD Support
 
 That's all for now, maybe i'll expand it later, or complete more stuff.
