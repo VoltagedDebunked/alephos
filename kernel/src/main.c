@@ -35,10 +35,15 @@
 #include <core/drivers/usb/keyboard.h>
 #include <core/drivers/ioapic.h>
 #include <core/drivers/lapic.h>
-#include <core/drivers/ip.h>
+#include <core/drivers/net/ip.h>
+#include <core/drivers/net/e1000.h>
+#include <core/drivers/net/netdev.h>
 
 // Net
 #include <net/net.h>
+
+// Global framebuffer pointer for exception handler
+struct limine_framebuffer* global_framebuffer;
 
 // Stack definitions
 #define STACK_SIZE 16384 // 16 KB for each stack
@@ -52,9 +57,6 @@ static uint8_t ist4_stack[STACK_SIZE] __attribute__((aligned(16))); // Machine C
 static uint8_t ist5_stack[STACK_SIZE] __attribute__((aligned(16))); // Stack Fault
 static uint8_t ist6_stack[STACK_SIZE] __attribute__((aligned(16))); // GPF
 static uint8_t ist7_stack[STACK_SIZE] __attribute__((aligned(16))); // General interrupts
-
-// Global framebuffer pointer for exception handler
-struct limine_framebuffer* global_framebuffer;
 
 // Function to get the top of a stack (stack grows downward on x86)
 static inline uint64_t stack_top(uint8_t* stack) {
@@ -197,15 +199,28 @@ void kmain(void) {
 
     draw_string(global_framebuffer, "[ INFO ] LAPIC Initialized and Enabled.", 0, 260, WHITE);
 
+    // Initialize IP stack
     ip_init();
 
     draw_string(global_framebuffer, "[ INFO ] IP Driver Initialized.", 0, 280, WHITE);
 
+    // Initialize network device drivers
+    netdev_init();
+
+    // Get default network device
+    struct netdev* net = netdev_get_default();
+    if (net && net->active) {
+        draw_string(global_framebuffer, "[ INFO ] Network interface initialized.", 0, 300, WHITE);
+    } else {
+        draw_string(global_framebuffer, "[ FAIL ] Network interface initialization failed.", 0, 300, RED);
+    }
+
+    // Initialize network stack
     net_init();
 
-    draw_string(global_framebuffer, "[ INFO ] Networking Initialized.", 0, 300, WHITE);
+    draw_string(global_framebuffer, "[ INFO ] Network stack initialized.", 0, 320, WHITE);
 
-    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 320, GREEN);
+    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 340, GREEN);
 
     // Main kernel loop
     while (1) {}

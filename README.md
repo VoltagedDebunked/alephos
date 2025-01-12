@@ -36,6 +36,8 @@
 - [ ] PS/2 Mouse Driver
 - [ ] Ported Apps
 - [x] TCP/IP Stack
+- [ ] DNS Resolution
+- [x] NIC Driver
 - [ ] Ported Standard C Library
 - [ ] ELF Loading and execution
 - [ ] HTTPS Support
