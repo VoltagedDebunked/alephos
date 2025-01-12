@@ -22,9 +22,10 @@
 #include <core/idt.h>
 #include <core/acpi.h>
 
-// Memory, yes this is the part that REALLY fucked me over.
+// Memory
 #include <mm/pmm.h>
 #include <mm/vmm.h>
+#include <mm/heap.h>
 
 // Drivers
 #include <core/drivers/ps2/keyboard.h>
@@ -170,39 +171,43 @@ void kmain(void) {
 
     draw_string(global_framebuffer, "[ INFO ] VMM Initialized.", 0, 120, WHITE);
 
+    heap_init();
+
+    draw_string(global_framebuffer, "[ INFO ] Heap Initialized.", 0, 140, WHITE);
+
     pic_init();
 
-    draw_string(global_framebuffer, "[ INFO ] PIC Initialized.", 0, 140, WHITE);
+    draw_string(global_framebuffer, "[ INFO ] PIC Initialized.", 0, 160, WHITE);
 
     keyboard_init();
 
-    draw_string(global_framebuffer, "[ INFO ] Keyboard Initialized.", 0, 160, WHITE);
+    draw_string(global_framebuffer, "[ INFO ] Keyboard Initialized.", 0, 180, WHITE);
 
     acpi_init();
 
-    draw_string(global_framebuffer, "[ INFO ] ACPI Initialized.", 0, 180, WHITE);
+    draw_string(global_framebuffer, "[ INFO ] ACPI Initialized.", 0, 200, WHITE);
 
     pci_init();
 
-    draw_string(global_framebuffer, "[ INFO ] PCI Initialized.", 0, 200, WHITE);
+    draw_string(global_framebuffer, "[ INFO ] PCI Initialized.", 0, 220, WHITE);
 
     usb_keyboard_init();
 
-    draw_string(global_framebuffer, "[ INFO ] USB Support Initialized.", 0, 220, WHITE);
+    draw_string(global_framebuffer, "[ INFO ] USB Support Initialized.", 0, 240, WHITE);
 
     ioapic_init();
 
-    draw_string(global_framebuffer, "[ INFO ] I/O APIC Initialized.", 0, 240, WHITE);
+    draw_string(global_framebuffer, "[ INFO ] I/O APIC Initialized.", 0, 260, WHITE);
 
     lapic_init();
     lapic_enable();
 
-    draw_string(global_framebuffer, "[ INFO ] LAPIC Initialized and Enabled.", 0, 260, WHITE);
+    draw_string(global_framebuffer, "[ INFO ] LAPIC Initialized and Enabled.", 0, 280, WHITE);
 
     // Initialize IP stack
     ip_init();
 
-    draw_string(global_framebuffer, "[ INFO ] IP Driver Initialized.", 0, 280, WHITE);
+    draw_string(global_framebuffer, "[ INFO ] IP Driver Initialized.", 0, 300, WHITE);
 
     // Initialize network device drivers
     netdev_init();
@@ -210,17 +215,17 @@ void kmain(void) {
     // Get default network device
     struct netdev* net = netdev_get_default();
     if (net && net->active) {
-        draw_string(global_framebuffer, "[ INFO ] Network interface initialized.", 0, 300, WHITE);
+        draw_string(global_framebuffer, "[ INFO ] Network interface initialized.", 0, 320, WHITE);
     } else {
-        draw_string(global_framebuffer, "[ FAIL ] Network interface initialization failed.", 0, 300, RED);
+        draw_string(global_framebuffer, "[ FAIL ] Network interface initialization failed.", 0, 320, RED);
     }
 
     // Initialize network stack
     net_init();
 
-    draw_string(global_framebuffer, "[ INFO ] Network stack initialized.", 0, 320, WHITE);
+    draw_string(global_framebuffer, "[ INFO ] Network stack initialized.", 0, 340, WHITE);
 
-    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 340, GREEN);
+    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 360, GREEN);
 
     // Main kernel loop
     while (1) {}

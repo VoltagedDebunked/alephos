@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <mm/pmm.h>
+#include <mm/heap.h>
 
 void *memset(void *s, int c, size_t n) {
     uint8_t *p = (uint8_t *)s;
@@ -54,41 +55,13 @@ void *memcpy(void *dest, const void *src, size_t n) {
 }
 
 void* malloc(size_t size) {
-    size_t pages_needed = (size + PAGE_SIZE - 1) / PAGE_SIZE;
-
-    // Allocate pages
-    void* memory = NULL;
-    for (size_t i = 0; i < pages_needed; i++) {
-        void* page = pmm_alloc_page();
-        if (!page) {
-            // Allocation failed, free previously allocated pages
-            if (memory) {
-                void* free_page = memory;
-                for (size_t j = 0; j < i; j++) {
-                    pmm_free_page(free_page);
-                    free_page = (uint8_t*)free_page + PAGE_SIZE;
-                }
-            }
-            return NULL;
-        }
-
-        // First page is the start of our allocation
-        if (i == 0) {
-            memory = page;
-        }
-    }
-
-    return memory;
+    return heap_alloc(size);
 }
 
 void free(void* ptr) {
-    if (!ptr) return;
+    heap_free(ptr);
+}
 
-    // Free pages starting from the pointer
-    void* current_page = ptr;
-    while (1) {
-        void* next_page = (uint8_t*)current_page + PAGE_SIZE;
-        pmm_free_page(current_page);
-        break;
-    }
+void* realloc(void* ptr, size_t size) {
+    return heap_realloc(ptr, size);
 }
