@@ -1,5 +1,6 @@
+; Interrupt Service Routines stubs
 [BITS 64]
-default rel
+
 section .text
 
 ; External C handler
@@ -8,14 +9,19 @@ extern exception_handler_common
 ; Export the ISR stub table
 global isr_stub_table
 
-; Create ISR stub table
+; Ensure alignment for the table
 align 16
+section .data
+
+; Create ISR stub table in data section
 isr_stub_table:
     %assign i 0
     %rep 256
         dq isr_stub_%+i
     %assign i i+1
     %endrep
+
+section .text
 
 ; Macro for ISRs that don't push an error code
 %macro ISR_NOERROR 1
@@ -59,7 +65,7 @@ isr_common:
     mov     rdx, rax
     and     rax, 0xFFFB    ; Clear TS bit
     mov     cr0, rax       ; Disable #NM
-    
+
     sub     rsp, 512
     fxsave  [rsp]          ; Save FPU/SSE state
 
@@ -70,7 +76,7 @@ isr_common:
     ; Restore SIMD state
     fxrstor [rsp]
     add     rsp, 512
-    
+
     mov     cr0, rdx       ; Restore original CR0
 
     ; Restore general purpose registers
@@ -92,7 +98,7 @@ isr_common:
 
     ; Remove error code and interrupt number
     add     rsp, 16
-    
+
     ; Return from interrupt
     iretq
 

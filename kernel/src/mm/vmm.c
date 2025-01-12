@@ -5,6 +5,7 @@
 #include <utils/asm.h>
 
 extern volatile struct limine_hhdm_request hhdm_request;
+extern volatile struct limine_kernel_address_request kernel_address_request;
 
 // Page table entry structure
 typedef uint64_t page_entry_t;
@@ -79,6 +80,15 @@ void vmm_init(void) {
     // Identity map first 1MB for hardware access
     for (uint64_t addr = 0; addr < IDENTITY_MAP_SIZE; addr += PAGE_SIZE) {
         vmm_map_page(addr, addr, PTE_PRESENT | PTE_WRITABLE);
+    }
+
+    // Map kernel using Limine-provided addresses
+    uint64_t kernel_virt = kernel_address_request.response->virtual_base;
+    uint64_t kernel_phys = kernel_address_request.response->physical_base;
+    uint64_t kernel_size = PAGE_ALIGN(kernel_address_request.response->virtual_base + 0x1000000 - kernel_virt);  // Map 16MB to be safe
+
+    for (uint64_t offset = 0; offset < kernel_size; offset += PAGE_SIZE) {
+        vmm_map_page(kernel_virt + offset, kernel_phys + offset, PTE_PRESENT | PTE_WRITABLE);
     }
 
     // Switch to new PML4
