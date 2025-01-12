@@ -60,11 +60,7 @@ void vmm_init(void) {
 
     // Get current PML4
     uint64_t cr3;
-    asm volatile(
-        "mov rax, cr3"
-        : "=a"(cr3)
-        :: "memory"
-    );
+    asm volatile("mov rax, cr3" : "=a"(cr3) :: "memory");
 
     current_pml4 = phys_to_virt(cr3 & ~0xFFF);
 
@@ -85,10 +81,51 @@ void vmm_init(void) {
     // Map kernel using Limine-provided addresses
     uint64_t kernel_virt = kernel_address_request.response->virtual_base;
     uint64_t kernel_phys = kernel_address_request.response->physical_base;
-    uint64_t kernel_size = PAGE_ALIGN(kernel_address_request.response->virtual_base + 0x1000000 - kernel_virt);  // Map 16MB to be safe
+    uint64_t kernel_size = PAGE_ALIGN(kernel_address_request.response->virtual_base + 0x1000000 - kernel_virt);
 
     for (uint64_t offset = 0; offset < kernel_size; offset += PAGE_SIZE) {
         vmm_map_page(kernel_virt + offset, kernel_phys + offset, PTE_PRESENT | PTE_WRITABLE);
+    }
+
+    // Map the page tables themselves
+    uint64_t pt_phys = virt_to_phys(new_pml4);
+    uint64_t pt_virt = (uint64_t)new_pml4;
+
+    // Map the PML4 itself
+    vmm_map_page(pt_virt, pt_phys, PTE_PRESENT | PTE_WRITABLE);
+
+    // Need to also map any page tables referenced by PML4
+    for (int pml4_index = 0; pml4_index < 512; pml4_index++) {
+        if (!(new_pml4->entries[pml4_index] & PTE_PRESENT)) {
+            continue;
+        }
+
+        // Map the PDPT
+        uint64_t pdpt_phys = new_pml4->entries[pml4_index] & ~0xFFF;
+        page_table_t* pdpt = phys_to_virt(pdpt_phys);
+        vmm_map_page((uint64_t)pdpt, pdpt_phys, PTE_PRESENT | PTE_WRITABLE);
+
+        // Map the page directories
+        for (int pdpt_index = 0; pdpt_index < 512; pdpt_index++) {
+            if (!(pdpt->entries[pdpt_index] & PTE_PRESENT)) {
+                continue;
+            }
+
+            uint64_t pd_phys = pdpt->entries[pdpt_index] & ~0xFFF;
+            page_table_t* pd = phys_to_virt(pd_phys);
+            vmm_map_page((uint64_t)pd, pd_phys, PTE_PRESENT | PTE_WRITABLE);
+
+            // Map the page tables
+            for (int pd_index = 0; pd_index < 512; pd_index++) {
+                if (!(pd->entries[pd_index] & PTE_PRESENT)) {
+                    continue;
+                }
+
+                uint64_t pt_phys = pd->entries[pd_index] & ~0xFFF;
+                page_table_t* pt = phys_to_virt(pt_phys);
+                vmm_map_page((uint64_t)pt, pt_phys, PTE_PRESENT | PTE_WRITABLE);
+            }
+        }
     }
 
     // Switch to new PML4
