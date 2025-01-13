@@ -92,70 +92,122 @@ nvme_result_t nvme_init(void) {
 
 // Probe and initialize a single NVMe device
 nvme_result_t nvme_probe_device(struct pci_device* pci_dev) {
-    if (num_nvme_devices >= NVME_MAX_DEVICES) {
-        return NVME_ERR_QUEUE_FULL;
-    }
+   // Check if we've reached maximum device limit
+   if (num_nvme_devices >= NVME_MAX_DEVICES) {
+       return NVME_ERR_QUEUE_FULL;
+   }
 
-    nvme_device_t* device = &nvme_devices[num_nvme_devices];
-    memset(device, 0, sizeof(nvme_device_t));
-    device->pci_dev = pci_dev;
+   // Get a reference to the next available NVMe device
+   nvme_device_t* device = &nvme_devices[num_nvme_devices];
 
-    // Enable PCI device
-    uint32_t cmd = pci_read_config(pci_dev->bus, pci_dev->slot, pci_dev->func, 0x04);
-    cmd |= (1 << 2) | (1 << 1);
-    pci_write_config(pci_dev->bus, pci_dev->slot, pci_dev->func, 0x04, cmd);
+   // Clear device structure
+   memset(device, 0, sizeof(nvme_device_t));
 
-    // Map MMIO base
-    uint64_t mmio_phys = pci_get_bar(pci_dev, 0);
-    if (!mmio_phys) return NVME_ERR_INITIALIZATION;
-    device->mmio_base = (volatile void*)vmm_get_phys_addr(mmio_phys);
+   // Store PCI device information
+   device->pci_dev = pci_dev;
 
-    // Reset controller
-    NVME_WRITE_REG32(device, NVME_REG_CC, 0);
-    uint64_t timeout = 100000;
-    while ((NVME_READ_REG32(device, NVME_REG_CSTS) & 0x1) && timeout--);
+   // Enable PCI device
+   uint32_t cmd = pci_read_config(pci_dev->bus, pci_dev->slot, pci_dev->func, 0x04);
+   cmd |= (1 << 2) | (1 << 1);  // Bus Master Enable, Memory Space Enable
+   pci_write_config(pci_dev->bus, pci_dev->slot, pci_dev->func, 0x04, cmd);
 
-    // Create admin queues
-    device->admin_sq.sq_base = nvme_alloc_queue(PAGE_SIZE);
-    device->admin_cq.cq_base = nvme_alloc_queue(PAGE_SIZE);
-    if (!device->admin_sq.sq_base || !device->admin_cq.cq_base) {
-        return NVME_ERR_INITIALIZATION;
-    }
+   // Get memory-mapped base address
+   uint64_t mmio_base = pci_get_bar(pci_dev, 0);
+   if (!mmio_base) {
+       return NVME_ERR_INITIALIZATION;
+   }
 
-    device->admin_sq.queue_size = NVME_QUEUE_DEPTH;
-    device->admin_cq.queue_size = NVME_QUEUE_DEPTH;
+   // Map MMIO space
+   device->mmio_base = (volatile void*)vmm_get_phys_addr(mmio_base);
 
-    // Set queue base addresses
-    NVME_WRITE_REG64(device, NVME_REG_ASQ, (uint64_t)device->admin_sq.sq_base);
-    NVME_WRITE_REG64(device, NVME_REG_ACQ, (uint64_t)device->admin_cq.cq_base);
+   // Reset the controller
+   NVME_WRITE_REG32(device, NVME_REG_CC, 0);
 
-    // Set queue attributes
-    uint32_t aqa = ((device->admin_sq.queue_size - 1) << 16) |
-                   (device->admin_cq.queue_size - 1);
-    NVME_WRITE_REG32(device, NVME_REG_AQA, aqa);
+   // Wait for controller to become disabled
+   uint64_t timeout = 100000;
+   while ((NVME_READ_REG32(device, NVME_REG_CSTS) & 0x1) && timeout--) {
+       for (int i = 0; i < 1000; i++) {
+           __asm__ volatile("pause");
+       }
+   }
 
-    // Enable controller
-    uint32_t cc = (3 << 14) | (0 << 11) | (6 << 7) | (0 << 4) | (1 << 0);
-    NVME_WRITE_REG32(device, NVME_REG_CC, cc);
+   // Allocate admin submission queue
+   device->admin_sq.sq_base = nvme_alloc_queue(PAGE_SIZE);
+   if (!device->admin_sq.sq_base) {
+       return NVME_ERR_INITIALIZATION;
+   }
 
-    // Wait for controller to become ready
-    timeout = 100000;
-    while (!(NVME_READ_REG32(device, NVME_REG_CSTS) & 0x1) && timeout--);
+   // Allocate admin completion queue
+   device->admin_cq.cq_base = nvme_alloc_queue(PAGE_SIZE);
+   if (!device->admin_cq.cq_base) {
+       return NVME_ERR_INITIALIZATION;
+   }
 
-    // Identify controller
-    nvme_sq_entry_t identify_cmd = {0};
-    identify_cmd.cdw0 = (NVME_ADMIN_IDENTIFY << 16);
-    identify_cmd.dptr = (uint64_t)&device->controller_info;
-    identify_cmd.cdw10 = NVME_IDENTIFY_CONTROLLER;
+   // Allocate page-aligned physical buffer for controller identify data
+   void* identify_buffer = pmm_alloc_page();
+   if (!identify_buffer) {
+       return NVME_ERR_INITIALIZATION;
+   }
 
-    if (nvme_submit_command(device, &identify_cmd) != NVME_SUCCESS) {
-        return NVME_ERR_INITIALIZATION;
-    }
+   // Configure queue parameters
+   device->admin_sq.queue_size = NVME_QUEUE_DEPTH;
+   device->admin_cq.queue_size = NVME_QUEUE_DEPTH;
 
-    device->initialized = true;
-    num_nvme_devices++;
+   // Set queue base addresses
+   NVME_WRITE_REG64(device, NVME_REG_ASQ, (uint64_t)device->admin_sq.sq_base);
+   NVME_WRITE_REG64(device, NVME_REG_ACQ, (uint64_t)device->admin_cq.cq_base);
 
-    return NVME_SUCCESS;
+   // Set queue attributes
+   uint32_t aqa = ((device->admin_sq.queue_size - 1) << 16) |
+                  (device->admin_cq.queue_size - 1);
+   NVME_WRITE_REG32(device, NVME_REG_AQA, aqa);
+
+   // Enable controller
+   uint32_t cc = (3 << 14) |   // CSS: NVMe command set
+                 (0 << 11) |   // AMS: Round Robin
+                 (6 << 7)  |   // MPS: Page Size
+                 (0 << 4)  |   // CSS: NVMe command set
+                 (1 << 0);     // Enable
+   NVME_WRITE_REG32(device, NVME_REG_CC, cc);
+
+   // Wait for controller to become ready
+   timeout = 100000;
+   while (!(NVME_READ_REG32(device, NVME_REG_CSTS) & 0x1) && timeout--) {
+       for (int i = 0; i < 1000; i++) {
+           __asm__ volatile("pause");
+       }
+   }
+
+   // Check if controller initialization timed out
+   if (timeout == 0) {
+       pmm_free_page(identify_buffer);
+       return NVME_ERR_TIMEOUT;
+   }
+
+   // Prepare Identify command
+   nvme_sq_entry_t identify_cmd = {0};
+   identify_cmd.cdw0 = (NVME_ADMIN_IDENTIFY << 16);
+   identify_cmd.dptr = (uint64_t)identify_buffer;  // Use physical address directly
+   identify_cmd.cdw10 = NVME_IDENTIFY_CONTROLLER;
+
+   // Submit Identify command
+   nvme_result_t result = nvme_submit_command(device, &identify_cmd);
+   if (result != NVME_SUCCESS) {
+       pmm_free_page(identify_buffer);
+       return NVME_ERR_INITIALIZATION;
+   }
+
+   // Copy identify data to controller_info
+   memcpy(&device->controller_info, identify_buffer, sizeof(nvme_controller_info_t));
+
+   // Free the temporary buffer
+   pmm_free_page(identify_buffer);
+
+   // Mark device as initialized
+   device->initialized = true;
+   num_nvme_devices++;
+
+   return NVME_SUCCESS;
 }
 
 // Read from NVMe Namespace
