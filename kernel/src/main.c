@@ -43,6 +43,7 @@
 
 // Net
 #include <net/net.h>
+#include <net/http/http.h>
 
 // Global framebuffer pointer for exception handler
 struct limine_framebuffer* global_framebuffer;
@@ -119,20 +120,14 @@ void kmain(void) {
     // Initialize framebuffer first for debug output
     fb_init();
     global_framebuffer = framebuffer_request.response->framebuffers[0];
-    draw_string(global_framebuffer, "[ INFO ] Framebuffer Initialized.", 0, 0, WHITE);
-
     check_fb();
-    draw_string(global_framebuffer, "[ STATUS ] Framebuffer Checked: Framebuffer state is good.", 0, 20, WHITE);
 
     // Initialize memory management first
     pmm_init(memmap_request.response);
-    draw_string(global_framebuffer, "[ INFO ] PMM Initialized.", 0, 40, WHITE);
 
     vmm_init();
-    draw_string(global_framebuffer, "[ INFO ] VMM Initialized.", 0, 60, WHITE);
 
     heap_init();
-    draw_string(global_framebuffer, "[ INFO ] Heap Initialized.", 0, 80, WHITE);
 
     // Initialize GDT with proper stacks
     gdt_init();
@@ -157,8 +152,6 @@ void kmain(void) {
     ist_ptr = (uint64_t*)(stack_top(ist7_stack));
     *(ist_ptr - 1) = stack_top(ist7_stack);  // General interrupts
 
-    draw_string(global_framebuffer, "[ INFO ] GDT and TSS Initialized.", 0, 100, WHITE);
-
     // Initialize IDT after GDT is set up
     idt_init();
 
@@ -167,61 +160,25 @@ void kmain(void) {
         register_exception_handler(i, general_exception_handler);
     }
 
-    draw_string(global_framebuffer, "[ INFO ] IDT Initialized.", 0, 120, WHITE);
-
     // Enable interrupts
     sti();
-    draw_string(global_framebuffer, "[ INFO ] Interrupts Enabled.", 0, 140, WHITE);
-
-    // Interrupt controllers initialization
     pic_init();
-    draw_string(global_framebuffer, "[ INFO ] PIC Initialized.", 0, 160, WHITE);
-
     ioapic_init();
-    draw_string(global_framebuffer, "[ INFO ] I/O APIC Initialized.", 0, 180, WHITE);
-
     lapic_init();
     lapic_enable();
-    draw_string(global_framebuffer, "[ INFO ] LAPIC Initialized and Enabled.", 0, 200, WHITE);
-
-    // Device initializations
     keyboard_init();
     usb_keyboard_init();
-    draw_string(global_framebuffer, "[ INFO ] Keyboard Initialized.", 0, 220, WHITE);
-
     acpi_init();
-    draw_string(global_framebuffer, "[ INFO ] ACPI Initialized.", 0, 240, WHITE);
-
     pci_init();
-    draw_string(global_framebuffer, "[ INFO ] PCI Initialized.", 0, 260, WHITE);
-
     usb_init();
-    draw_string(global_framebuffer, "[ INFO ] USB Support Initialized.", 0, 280, WHITE);
-
-    // Initialize IP stack
     ip_init();
-    draw_string(global_framebuffer, "[ INFO ] IP Driver Initialized.", 0, 300, WHITE);
-
-    // Initialize network device drivers
     netdev_init();
-
-    // Get default network device
     struct netdev* net = netdev_get_default();
-    if (net && net->active) {
-        draw_string(global_framebuffer, "[ INFO ] Network interface initialized.", 0, 320, WHITE);
-    } else {
-        draw_string(global_framebuffer, "[ FAIL ] Network interface initialization failed.", 0, 320, RED);
-    }
-
-    // Initialize network stack
     net_init();
-    draw_string(global_framebuffer, "[ INFO ] Network stack initialized.", 0, 340, WHITE);
-
     nvme_init();
+    http_init();
 
-    draw_string(global_framebuffer, "[ INFO ] NVMe Driver initialized.", 0, 360, WHITE);
-
-    draw_string(global_framebuffer, "[ INFO ] Kernel Loaded.", 0, 380, GREEN);
+    draw_string(global_framebuffer, "Welcome to AlephOS!", 0, 0, WHITE);
 
     // Main kernel loop
     while (1) {}

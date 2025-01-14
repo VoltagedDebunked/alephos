@@ -13,5 +13,6 @@ void *memcpy(void *dest, const void *src, size_t n);
 // Memory allocation functions
 void* malloc(size_t size);
 void free(void* ptr);
+void* realloc(void* ptr, size_t size);
 
 #endif // MEM_H

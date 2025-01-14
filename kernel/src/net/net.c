@@ -223,6 +223,15 @@ int net_socket_accept(int socket, net_address* client_addr) {
     return -1;
 }
 
+static net_socket* get_socket(int fd) {
+    if (fd < 0 || fd >= NET_MAX_SOCKETS) return NULL;
+    return &socket_pool[fd];
+}
+
+net_socket* net_socket_get(int fd) {
+    return get_socket(fd);
+}
+
 // Send data
 int net_socket_send(int socket, const void* data, uint16_t length) {
     net_socket* sock = get_socket(socket);
@@ -314,12 +323,6 @@ void net_process_packets(void) {
             free(packet.data);
         }
     }
-}
-
-// Helper functions
-static net_socket* get_socket(int fd) {
-    if (fd < 0 || fd >= NET_MAX_SOCKETS) return NULL;
-    return &socket_pool[fd];
 }
 
 static int allocate_socket_fd(void) {

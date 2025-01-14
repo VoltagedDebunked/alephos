@@ -79,6 +79,8 @@ int net_socket_bind(int socket, uint32_t ip, uint16_t port);
 int net_socket_listen(int socket, int backlog);
 int net_socket_connect(int socket, uint32_t ip, uint16_t port);
 int net_socket_accept(int socket, net_address* client_addr);
+bool http_is_initialized(void);
+net_socket* net_socket_get(int fd);
 int net_socket_send(int socket, const void* data, uint16_t length);
 int net_socket_receive(int socket, void* buffer, uint16_t* length);
 void net_socket_close(int socket);

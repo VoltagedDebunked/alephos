@@ -42,12 +42,26 @@
 - [ ] Ported Standard C Library
 - [ ] ELF Loading and execution
 - [ ] HTTPS Support
+- [ ] HTTP Support
 - [ ] Browser Port (Minimal)
 - [ ] DOOM Port
 - [ ] SMP
 - [x] ACPI
 - [x] NVMe Support
 - [ ] HDD Support
+- [ ] Process Scheduler
+- [ ] Cooperative Tasks
+- [ ] Preemptive Multitasking
+- [ ] Terminal Driver
+- [ ] PTY Support
+- [ ] Pipe Support
+- [ ] Time Management
+- [ ] RTC Driver
+- [ ] FPU Support
+- [ ] SSE Support
+- [ ] Network Statistics
+- [ ] DHCP Client
+- [ ] Raw Sockets
 
 That's all for now, maybe i'll expand it later, or complete more stuff.
 
