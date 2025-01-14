@@ -45,6 +45,9 @@
 #include <net/net.h>
 #include <net/http/http.h>
 
+// Filesystem
+#include <fs/ext2.h>
+
 // Global framebuffer pointer for exception handler
 struct limine_framebuffer* global_framebuffer;
 
@@ -177,7 +180,7 @@ void kmain(void) {
     net_init();
     nvme_init();
     http_init();
-
+    ext2_init(0);
     draw_string(global_framebuffer, "Welcome to AlephOS!", 0, 0, WHITE);
 
     // Main kernel loop
