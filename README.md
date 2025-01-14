@@ -44,7 +44,8 @@
 - [x] HTTP Support
 - [ ] Browser Port (Minimal)
 - [ ] DOOM Port
-- [ ] SMP
+- [x] SMP
+- [x] PIT
 - [x] ACPI
 - [x] NVMe Support
 - [ ] Process Scheduler
