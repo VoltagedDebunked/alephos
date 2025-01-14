@@ -23,7 +23,7 @@
 - [x] LAPIC
 - [x] IOAPIC
 - [ ] Ring 3
-- [ ] Syscalls
+- [x] Syscalls
 - [x] FS (EXT2)
 - [x] Heap
 - [x] Framebuffer
@@ -39,7 +39,7 @@
 - [ ] DNS Resolution
 - [x] NIC Driver
 - [ ] Ported Standard C Library
-- [ ] ELF Loading and execution
+- [x] ELF Loading and execution
 - [ ] HTTPS Support
 - [x] HTTP Support
 - [ ] Browser Port (Minimal)
@@ -57,6 +57,7 @@
 - [x] Time Management
 - [x] RTC Driver (inside FS)
 - [ ] RTC Driver (outside FS)
+- [ ] STD I/o
 
 That's all for now, maybe i'll expand it later, or complete more stuff.
 

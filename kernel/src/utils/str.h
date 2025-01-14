@@ -1,6 +1,8 @@
 #ifndef STR_H
 #define STR_H
 
+#include <utils/mem.h>
+
 static int strlen(const char* str) {
     int len = 0;
     while (str[len]) len++;
