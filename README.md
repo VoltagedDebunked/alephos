@@ -32,8 +32,8 @@
 - [x] PS/2 Keyboard Driver
 - [x] PCI
 - [x] xHCI
-- [ ] USB Mouse Driver
-- [ ] PS/2 Mouse Driver
+- [x] USB Mouse Driver
+- [x] PS/2 Mouse Driver
 - [ ] Ported Apps
 - [x] TCP/IP Stack
 - [ ] DNS Resolution

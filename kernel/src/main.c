@@ -44,6 +44,8 @@
 #include <core/drivers/net/netdev.h>
 #include <core/drivers/storage/nvme.h>
 #include <core/drivers/serial/serial.h>
+#include <core/drivers/ps2/mouse.h>
+#include <core/drivers/usb/mouse.h>
 
 // Net
 #include <net/net.h>
@@ -130,11 +132,9 @@ void kmain(void) {
     check_fb();
 
     // Initialize memory management first
-    pmm_init(memmap_request.response);
-
-    vmm_init();
-
-    heap_init();
+    pmm_init(memmap_request.response); // Initialize Physical Memory Manager (PMM)
+    vmm_init(); // Initialize Virtual Memory Manager (VMM)
+    heap_init(); // Initialize the heap for dynamic memory allocation
 
     // Initialize GDT with proper stacks
     gdt_init();
@@ -142,7 +142,7 @@ void kmain(void) {
     // Set up TSS stacks
     gdt_load_tss(stack_top(kernel_stack)); // RSP0 - Kernel stack for privilege changes
 
-    // Set up IST entries in TSS
+    // Set up IST entries in TSS for exception handling
     uint64_t* ist_ptr;
     ist_ptr = (uint64_t*)(stack_top(ist1_stack));
     *(ist_ptr - 1) = stack_top(ist1_stack);  // Debug exceptions
@@ -159,7 +159,7 @@ void kmain(void) {
     ist_ptr = (uint64_t*)(stack_top(ist7_stack));
     *(ist_ptr - 1) = stack_top(ist7_stack);  // General interrupts
 
-    // Initialize IDT after GDT is set up
+    // Initialize IDT after GDT and TSS are set up
     idt_init();
 
     // Register exception handlers for all CPU exceptions
@@ -169,34 +169,60 @@ void kmain(void) {
 
     // Enable interrupts
     sti();
+
+    // Initialize peripheral devices (PIC, IOAPIC, LAPIC, USB, Keyboard, Mouse, etc.)
     pic_init();
     ioapic_init();
     lapic_init();
     lapic_enable();
-    keyboard_init();
-    usb_keyboard_init();
-    acpi_init();
-    pci_init();
     usb_init();
+    keyboard_init();
+    mouse_init();
+    mouse_enable();
+    usb_mouse_init();
+    usb_keyboard_init();
+
+    // Initialize ACPI (Advanced Configuration and Power Interface)
+    acpi_init();
+
+    // Initialize PCI (Peripheral Component Interconnect)
+    pci_init();
+
+    // Networking Initialization (IP stack, network devices, etc.)
     ip_init();
     netdev_init();
     struct netdev* net = netdev_get_default();
     net_init();
+
+    // Initialize NVMe (Non-Volatile Memory Express)
     nvme_init();
+
+    // Initialize HTTP support
     http_init();
+
+    // Initialize filesystems (EXT2, etc.)
     ext2_init(0);
+
+    // Initialize serial communication (COM1)
     serial_init(COM1);
+
+    // Initialize process management and the scheduler
     process_init();
     scheduler_init();
+
+    // Initialize the Programmable Interval Timer (PIT)
     pit_init();
+
+    // Initialize SMP (Symmetric Multi-Processing)
     smp_init();
     smp_boot_aps();
+
+    // Draw a welcome message to the framebuffer
     draw_string(global_framebuffer, "Welcome to AlephOS!", 0, 0, WHITE);
 
     // Main kernel loop
     while (1) {}
 
-    // If this stupid little compiler fucks with this infrastructure
-    // by "optimizing it" and making it reach here, im gonna crash out.
+    // Halt the CPU if the kernel ever reaches here
     hcf();
 }
