@@ -34,6 +34,7 @@
 - [x] xHCI
 - [x] USB Mouse Driver
 - [x] PS/2 Mouse Driver
+- [ ] BASH Port
 - [ ] Ported Apps
 - [x] TCP/IP Stack
 - [ ] DNS Resolution
@@ -51,9 +52,8 @@
 - [x] Process Scheduler & Manager
 - [ ] Cooperative Tasks
 - [ ] Preemptive Multitasking
-- [ ] Terminal Driver
-- [ ] PTY Support
-- [ ] Pipe Support
+- [x] TTY Support
+- [x] Pipe Support
 - [x] Time Management
 - [x] RTC Driver (inside FS)
 - [ ] RTC Driver (outside FS)

@@ -46,6 +46,8 @@
 #include <core/drivers/serial/serial.h>
 #include <core/drivers/ps2/mouse.h>
 #include <core/drivers/usb/mouse.h>
+#include <core/drivers/tty/tty.h>
+#include <core/drivers/tty/pipe.h>
 
 // Net
 #include <net/net.h>
@@ -216,6 +218,9 @@ void kmain(void) {
     // Initialize SMP (Symmetric Multi-Processing)
     smp_init();
     smp_boot_aps();
+
+    tty_init();
+    pipe_create();
 
     // Draw a welcome message to the framebuffer
     draw_string(global_framebuffer, "Welcome to AlephOS!", 0, 0, WHITE);
