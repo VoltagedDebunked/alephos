@@ -48,6 +48,7 @@
 #include <core/drivers/usb/mouse.h>
 #include <core/drivers/tty/tty.h>
 #include <core/drivers/tty/pipe.h>
+#include <core/drivers/rtc/rtc.h>
 
 // Net
 #include <net/net.h>
@@ -221,6 +222,8 @@ void kmain(void) {
 
     tty_init();
     pipe_create();
+
+    rtc_init();
 
     // Draw a welcome message to the framebuffer
     draw_string(global_framebuffer, "Welcome to AlephOS!", 0, 0, WHITE);

@@ -56,7 +56,7 @@
 - [x] Pipe Support
 - [x] Time Management
 - [x] RTC Driver (inside FS)
-- [ ] RTC Driver (outside FS)
+- [x] RTC Driver (outside FS)
 - [x] STD I/O
 
 That's all for now, maybe i'll expand it later, or complete more stuff.
