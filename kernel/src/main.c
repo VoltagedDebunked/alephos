@@ -53,6 +53,7 @@
 // Net
 #include <net/net.h>
 #include <net/http/http.h>
+#include <net/http/https.h>
 
 // Filesystem
 #include <fs/ext2.h>
@@ -202,6 +203,9 @@ void kmain(void) {
 
     // Initialize HTTP support
     http_init();
+
+    https_init();
+    tls_init();
 
     // Initialize filesystems (EXT2, etc.)
     ext2_init(0);

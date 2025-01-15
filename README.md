@@ -41,7 +41,8 @@
 - [x] NIC Driver
 - [ ] Ported Standard C Library
 - [x] ELF Loading and execution
-- [ ] HTTPS Support
+- [x] HTTPS Support
+- [x] TLS Support
 - [x] HTTP Support
 - [ ] Browser Port (Minimal)
 - [ ] DOOM Port
