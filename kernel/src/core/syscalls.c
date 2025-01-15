@@ -7,6 +7,10 @@
 #include <net/http/http.h>
 #include <utils/str.h>
 #include <core/drivers/storage/nvme.h>
+#include <core/drivers/serial/serial.h>
+
+// Default serial port for stdio
+static const uint16_t stdio_port = COM1;
 
 extern struct limine_framebuffer* global_framebuffer;
 
@@ -73,64 +77,67 @@ int sys_open(const char* pathname, int flags, uint16_t mode) {
 
 // Read from a file
 ssize_t sys_read(int fd, void* buf, size_t count) {
-    // Validate file descriptor
+    // Handle standard input
+    if (fd == STDIN_FILENO) {
+        // Basic character read from serial
+        if (count > 0) {
+            ((char*)buf)[0] = serial_read_char(stdio_port);
+            return 1;
+        }
+        return 0;
+    }
+
+    // Original file system implementation
     if (fd < 0 || fd >= MAX_FDS || !fd_table[fd].used || !fd_table[fd].read_allowed) {
         return -1;
     }
 
-    // Get inode
     struct ext2_inode* inode = ext2_get_inode(fd_table[fd].inode);
     if (!inode) {
         return -1;
     }
 
-    // Check if we're at or past end of file
     if (fd_table[fd].pos >= inode->i_size) {
         free(inode);
         return 0;
     }
 
-    // Adjust count if it would read past end of file
     if (fd_table[fd].pos + count > inode->i_size) {
         count = inode->i_size - fd_table[fd].pos;
     }
 
-    // Read data
     if (!ext2_read_file(fd_table[fd].inode, buf, fd_table[fd].pos, count)) {
         free(inode);
         return -1;
     }
 
-    // Update file position
     fd_table[fd].pos += count;
-
     free(inode);
     return count;
 }
 
 // Write to a file or framebuffer
 ssize_t sys_write(int fd, const void* buf, size_t count) {
-    // Stdout and stderr go to framebuffer
-    if (fd == 1 || fd == 2) {
-        static uint32_t current_y = 0;
-        draw_string(global_framebuffer, (const char*)buf, 0, current_y, 0xFFFFFF);
-        current_y += 16;  // Move to next line
+    // Handle standard output/error
+    if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
+        // Write each character to serial
+        const char* cbuf = (const char*)buf;
+        for (size_t i = 0; i < count; i++) {
+            serial_write_char(stdio_port, cbuf[i]);
+        }
         return count;
     }
 
-    // Validate file descriptor
+    // Original file system implementation
     if (fd < 0 || fd >= MAX_FDS || !fd_table[fd].used || !fd_table[fd].write_allowed) {
         return -1;
     }
 
-    // Write to file using existing ext2_write_file
     if (!ext2_write_file(fd_table[fd].inode, buf, fd_table[fd].pos, count)) {
         return -1;
     }
 
-    // Update file position
     fd_table[fd].pos += count;
-
     return count;
 }
 

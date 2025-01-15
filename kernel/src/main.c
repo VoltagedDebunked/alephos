@@ -42,6 +42,7 @@
 #include <core/drivers/net/e1000.h>
 #include <core/drivers/net/netdev.h>
 #include <core/drivers/storage/nvme.h>
+#include <core/drivers/serial/serial.h>
 
 // Net
 #include <net/net.h>
@@ -186,7 +187,7 @@ void kmain(void) {
     pit_init();
     smp_init();
     smp_boot_aps();
-
+    serial_init(COM1);
     draw_string(global_framebuffer, "Welcome to AlephOS!", 0, 0, WHITE);
 
     // Main kernel loop

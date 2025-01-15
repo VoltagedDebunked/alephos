@@ -25,6 +25,11 @@ typedef int64_t off_t;
 #define SYS_send                44
 #define SYS_recv                45
 
+// Std I/O stuff
+#define STDIN_FILENO  0
+#define STDOUT_FILENO 1
+#define STDERR_FILENO 2
+
 // File-related constants
 #define O_RDONLY    0x00
 #define O_WRONLY    0x01

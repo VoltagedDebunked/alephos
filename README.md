@@ -57,7 +57,7 @@
 - [x] Time Management
 - [x] RTC Driver (inside FS)
 - [ ] RTC Driver (outside FS)
-- [ ] STD I/o
+- [x] STD I/O
 
 That's all for now, maybe i'll expand it later, or complete more stuff.
 
