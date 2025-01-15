@@ -25,6 +25,8 @@
 - [ ] Ring 3
 - [x] Syscalls
 - [x] FS (EXT2)
+- [ ] FS (ISO9660)
+- [ ] VFS
 - [x] Heap
 - [x] Framebuffer
 - [x] Text Rendering
@@ -48,7 +50,7 @@
 - [x] PIT
 - [x] ACPI
 - [x] NVMe Support
-- [ ] Process Scheduler
+- [x] Process Scheduler & Manager
 - [ ] Cooperative Tasks
 - [ ] Preemptive Multitasking
 - [ ] Terminal Driver

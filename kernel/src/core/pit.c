@@ -1,5 +1,6 @@
 #include <core/pit.h>
 #include <utils/io.h>
+#include <core/process.h>
 
 #define PIT_CHANNEL0 0x40
 #define PIT_CHANNEL1 0x41
@@ -21,6 +22,7 @@ void pit_init(void) {
     uint16_t divisor = PIT_FREQUENCY / 100;
     outb(PIT_CHANNEL0, divisor & 0xFF);        // Low byte
     outb(PIT_CHANNEL0, (divisor >> 8) & 0xFF); // High byte
+    scheduler_tick();
 }
 
 void pit_wait(uint32_t milliseconds) {

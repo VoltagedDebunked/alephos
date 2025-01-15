@@ -60,4 +60,24 @@ static const char* strstr(const char* haystack, const char* needle) {
     return NULL;
 }
 
+static char* strncpy(char* dest, const char* src, size_t n) {
+    // Check for NULL pointers
+    if (!dest || !src || n == 0) {
+        return dest;
+    }
+
+    // Copy up to n characters
+    size_t i;
+    for (i = 0; i < n && src[i] != '\0'; i++) {
+        dest[i] = src[i];
+    }
+
+    // Pad remaining bytes with nulls if any
+    for (; i < n; i++) {
+        dest[i] = '\0';
+    }
+
+    return dest;
+}
+
 #endif

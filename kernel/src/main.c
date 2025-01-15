@@ -23,6 +23,7 @@
 #include <core/acpi.h>
 #include <core/pit.h>
 #include <core/smp.h>
+#include <core/process.h>
 
 // Memory
 #include <mm/pmm.h>
@@ -184,10 +185,12 @@ void kmain(void) {
     nvme_init();
     http_init();
     ext2_init(0);
+    serial_init(COM1);
+    process_init();
+    scheduler_init();
     pit_init();
     smp_init();
     smp_boot_aps();
-    serial_init(COM1);
     draw_string(global_framebuffer, "Welcome to AlephOS!", 0, 0, WHITE);
 
     // Main kernel loop
