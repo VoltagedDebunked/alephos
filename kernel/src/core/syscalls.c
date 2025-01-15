@@ -1,521 +1,340 @@
 #include <core/syscalls.h>
+#include <mm/vmm.h>
+#include <mm/pmm.h>
+#include <mm/heap.h>
+#include <fs/ext2.h>
 #include <core/process.h>
 #include <core/elf.h>
-#include <fs/ext2.h>
-#include <mm/heap.h>
-#include <mm/vmm.h>
-#include <utils/mem.h>
-#include <utils/str.h>
+#include <core/acpi.h>
+#include <core/drivers/pic.h>
+#include <core/drivers/lapic.h>
 #include <core/drivers/serial/serial.h>
 #include <core/drivers/net/netdev.h>
 #include <net/net.h>
+#include <graphics/display.h>
+#include <limine.h>
+#include <utils/mem.h>
+#include <utils/str.h>
 
-#undef MAX_PROCESSES
-#define MAX_PROCESSES 256
+extern volatile struct limine_framebuffer_request framebuffer_request;
 
-// Process tracking structure
 typedef struct {
-    int pid;                // Process ID
-    int parent_pid;         // Parent Process ID
-    int status;             // Exit status
-    bool exited;            // Has the process exited?
-    struct process* proc;   // Pointer to process structure
-    int signal;             // Pending signal
+    uint32_t inode;
+    uint32_t offset;
+    uint32_t flags;
+    uint16_t refcount;
+    void* private_data;
+} file_descriptor_t;
+
+static file_descriptor_t* fd_table[MAX_FDS];
+static void* program_break = NULL;
+static void* next_mmap_addr = (void*)0x600000000000ULL;
+
+typedef struct process_info {
+    int pid;
+    int parent_pid;
+    int exit_status;
+    bool terminated;
+    struct process_info* next;
 } process_info_t;
 
-// Global process tracking array
-static process_info_t process_tracking[MAX_PROCESSES];
+extern process_t* process_list;
 
-// Find a free slot in process tracking
-static int find_free_process_slot() {
-    for (int i = 0; i < MAX_PROCESSES; i++) {
-        if (!process_tracking[i].proc) {
-            return i;
+static int alloc_fd(void) {
+    for (int i = 0; i < MAX_FDS; i++) {
+        if (!fd_table[i]) {
+            fd_table[i] = malloc(sizeof(file_descriptor_t));
+            if (fd_table[i]) {
+                memset(fd_table[i], 0, sizeof(file_descriptor_t));
+                fd_table[i]->refcount = 1;
+                return i;
+            }
+            return -ENOMEM;
         }
     }
-    return -1;
+    return -EMFILE;
 }
 
-// Find process info by PID
-static process_info_t* find_process_by_pid(int pid) {
-    for (int i = 0; i < MAX_PROCESSES; i++) {
-        if (process_tracking[i].proc && process_tracking[i].pid == pid) {
-            return &process_tracking[i];
+static void free_fd(int fd) {
+    if (fd >= 0 && fd < MAX_FDS && fd_table[fd]) {
+        fd_table[fd]->refcount--;
+        if (fd_table[fd]->refcount == 0) {
+            if (fd_table[fd]->private_data) {
+                net_socket_close(((net_socket*)fd_table[fd]->private_data)->fd);
+                free(fd_table[fd]->private_data);
+            }
+            free(fd_table[fd]);
+            fd_table[fd] = NULL;
         }
-    }
-    return NULL;
-}
-
-// Find child processes of a given parent PID
-static int find_child_processes(int parent_pid, int* child_pids, int max_children) {
-    int count = 0;
-    for (int i = 0; i < MAX_PROCESSES; i++) {
-        if (process_tracking[i].proc &&
-            process_tracking[i].parent_pid == parent_pid) {
-
-            if (count < max_children) {
-                child_pids[count] = process_tracking[i].pid;
-            }
-            count++;
-        }
-    }
-    return count;
-}
-
-// Memory mapping for arguments and environment
-typedef struct {
-    char* argv[MAX_ARGS];
-    char* envp[MAX_ENV];
-    char arg_buffer[MAX_ARGS * MAX_ARG_LENGTH];
-    char env_buffer[MAX_ENV * MAX_ARG_LENGTH];
-    int argc;
-    int envc;
-} exec_args_t;
-
-// Prepare arguments for exec
-static bool prepare_exec_args(exec_args_t* args, char* const argv[], char* const envp[]) {
-    // Reset all pointers and buffers
-    memset(args, 0, sizeof(exec_args_t));
-
-    // Copy arguments
-    if (argv) {
-        for (args->argc = 0;
-             argv[args->argc] && args->argc < MAX_ARGS - 1;
-             args->argc++) {
-
-            size_t len = strlen(argv[args->argc]);
-            if (len >= MAX_ARG_LENGTH) {
-                return false;  // Argument too long
-            }
-
-            // Copy argument to buffer
-            args->argv[args->argc] = args->arg_buffer + (args->argc * MAX_ARG_LENGTH);
-            strncpy(args->argv[args->argc], argv[args->argc], MAX_ARG_LENGTH - 1);
-        }
-        args->argv[args->argc] = NULL;  // Null terminate
-    }
-
-    // Copy environment variables
-    if (envp) {
-        for (args->envc = 0;
-             envp[args->envc] && args->envc < MAX_ENV - 1;
-             args->envc++) {
-
-            size_t len = strlen(envp[args->envc]);
-            if (len >= MAX_ARG_LENGTH) {
-                return false;  // Environment variable too long
-            }
-
-            // Copy environment variable to buffer
-            args->envp[args->envc] = args->env_buffer + (args->envc * MAX_ARG_LENGTH);
-            strncpy(args->envp[args->envc], envp[args->envc], MAX_ARG_LENGTH - 1);
-        }
-        args->envp[args->envc] = NULL;  // Null terminate
-    }
-
-    return true;
-}
-
-// Signal handling function
-static void handle_signal(process_info_t* proc_info, int signal) {
-    if (!proc_info) return;
-
-    switch (signal) {
-        case SIGKILL:
-            // Terminate the process immediately
-            if (proc_info->proc) {
-                proc_info->exited = true;
-                proc_info->status = -1;  // Killed
-
-                // Remove from scheduler
-                scheduler_remove(proc_info->proc);
-
-                // Free process resources
-                process_destroy(proc_info->proc);
-                proc_info->proc = NULL;
-            }
-            break;
-
-        case SIGSTOP:
-            // Pause the process
-            if (proc_info->proc) {
-                proc_info->proc->state = PROCESS_STATE_BLOCKED;
-            }
-            break;
-
-        case SIGCONT:
-            // Resume a stopped process
-            if (proc_info->proc) {
-                proc_info->proc->state = PROCESS_STATE_READY;
-                scheduler_add(proc_info->proc);
-            }
-            break;
-
-        default:
-            // Store pending signal
-            proc_info->signal = signal;
-            break;
     }
 }
 
-// File operations syscalls
-int sys_open(const char* pathname, int flags, uint16_t mode) {
-    // Find the file in the filesystem
-    uint32_t root_inode = EXT2_ROOT_INO;
+int sys_socket(int domain, int type, int protocol) {
+    int fd = alloc_fd();
+    if (fd < 0) return fd;
 
-    // Find the file in the root directory
-    uint32_t file_inode = ext2_find_file(root_inode, pathname);
+    // Properly cast the return value
+    net_socket* sock = (net_socket*)net_socket_create(
+        type == SOCK_STREAM ? SOCKET_TCP :
+        type == SOCK_DGRAM ? SOCKET_UDP :
+        SOCKET_RAW
+    );
 
-    // If file doesn't exist and O_CREAT is set, create it
-    if (!file_inode && (flags & O_CREAT)) {
-        file_inode = ext2_create_file(root_inode, pathname,
-            (mode & 0777) | ((flags & O_DIRECTORY) ? EXT2_S_IFDIR : EXT2_S_IFREG));
+    if (!sock) {
+        free_fd(fd);
+        return -ENOMEM;
     }
 
-    if (!file_inode) {
-        return -1;  // File not found and couldn't be created
+    fd_table[fd]->private_data = sock;
+    fd_table[fd]->flags = O_RDWR;
+    return fd;
+}
+
+int sys_connect(int sockfd, const struct sockaddr* addr, uint32_t addrlen) {
+    if (!addr || addrlen < sizeof(struct sockaddr_in)) return -EINVAL;
+    if (sockfd < 0 || sockfd >= MAX_FDS || !fd_table[sockfd]) return -EBADF;
+
+    net_socket* sock = fd_table[sockfd]->private_data;
+    if (!sock) return -EBADF;
+
+    const struct sockaddr_in* addr_in = (const struct sockaddr_in*)addr;
+    return net_socket_connect(sock->fd, addr_in->sin_addr, addr_in->sin_port);
+}
+
+ssize_t sys_send(int sockfd, const void* buf, size_t len, int flags) {
+    if (!buf) return -EINVAL;
+    if (sockfd < 0 || sockfd >= MAX_FDS || !fd_table[sockfd]) return -EBADF;
+
+    net_socket* sock = fd_table[sockfd]->private_data;
+    if (!sock) return -EBADF;
+
+    return net_socket_send(sock->fd, buf, len);
+}
+
+ssize_t sys_recv(int sockfd, void* buf, size_t len, int flags) {
+    if (!buf) return -EINVAL;
+    if (sockfd < 0 || sockfd >= MAX_FDS || !fd_table[sockfd]) return -EBADF;
+
+    net_socket* sock = fd_table[sockfd]->private_data;
+    if (!sock) return -EBADF;
+
+    uint16_t received = len;
+    int result = net_socket_receive(sock->fd, buf, &received);
+    return result == 0 ? received : -EIO;
+}
+
+int sys_fork(void) {
+    process_t* current = get_current_process();
+    if (!current) return -EAGAIN;
+
+    process_t* child = process_create(
+        (void*)current->cpu_state->rip,
+        current->priority,
+        current->name
+    );
+
+    if (!child) return -EAGAIN;
+
+    memcpy(child->page_directory, current->page_directory, PAGE_SIZE);
+    memcpy(child->cpu_state, current->cpu_state, sizeof(cpu_state_t));
+
+    for (int i = 0; i < MAX_FDS; i++) {
+        if (fd_table[i]) fd_table[i]->refcount++;
     }
 
-    return file_inode;  // Use inode as file descriptor
+    child->cpu_state->rax = 0;
+    scheduler_add(child);
+
+    return child->pid;
+}
+
+int sys_execve(const char* pathname, char* const argv[], char* const envp[]) {
+    if (!pathname) return -EINVAL;
+
+    uint32_t inode = ext2_find_file(EXT2_ROOT_INO, pathname);
+    if (!inode) return -ENOENT;
+
+    struct ext2_inode* file_inode = ext2_get_inode(inode);
+    if (!file_inode) return -EIO;
+
+    void* program_data = malloc(file_inode->i_size);
+    if (!program_data) {
+        free(file_inode);
+        return -ENOMEM;
+    }
+
+    if (!ext2_read_file(inode, program_data, 0, file_inode->i_size)) {
+        free(program_data);
+        free(file_inode);
+        return -EIO;
+    }
+
+    uint64_t entry_point;
+    int result = elf_load_executable(program_data, file_inode->i_size, &entry_point);
+
+    free(program_data);
+    free(file_inode);
+
+    if (result != 0) return -ENOEXEC;
+
+    process_t* current = get_current_process();
+    if (!current) return -ESRCH;
+
+    current->cpu_state->rip = entry_point;
+    current->cpu_state->rdi = argv ? 1 : 0;
+    current->cpu_state->rsi = (uint64_t)argv;
+    current->cpu_state->rdx = (uint64_t)envp;
+
+    return 0;
+}
+
+void sys_exit(int status) {
+    process_t* current = get_current_process();
+    if (!current) return;
+
+    for (int i = 0; i < MAX_FDS; i++) {
+        free_fd(i);
+    }
+
+    current->state = PROCESS_STATE_TERMINATED;
+    scheduler_remove(current);
+
+    process_t* next = scheduler_next();
+    if (next) {
+        process_switch(next);
+    }
+
+    while (1) __asm__ volatile("hlt");
+}
+
+void* sys_mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset) {
+    if (length == 0) return (void*)-EINVAL;
+
+    length = (length + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+
+    if (!addr) {
+        addr = next_mmap_addr;
+        next_mmap_addr += length;
+    }
+
+    addr = (void*)(((uint64_t)addr + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
+
+    uint64_t page_flags = PTE_PRESENT | PTE_USER;
+    if (prot & PROT_WRITE) page_flags |= PTE_WRITABLE;
+    if (!(prot & PROT_EXEC)) page_flags |= PTE_NX;
+
+    if (!(flags & MAP_ANONYMOUS) && fd >= 0) {
+        if (fd >= MAX_FDS || !fd_table[fd]) return (void*)-EBADF;
+
+        for (size_t i = 0; i < length; i += PAGE_SIZE) {
+            void* phys = pmm_alloc_page();
+            if (!phys || !vmm_map_page((uint64_t)addr + i, (uint64_t)phys, page_flags)) {
+                goto cleanup;
+            }
+
+            if (!ext2_read_file(fd_table[fd]->inode,
+                              (void*)((uint64_t)addr + i),
+                              offset + i, PAGE_SIZE)) {
+                goto cleanup;
+            }
+        }
+    } else {
+        for (size_t i = 0; i < length; i += PAGE_SIZE) {
+            void* phys = pmm_alloc_page();
+            if (!phys || !vmm_map_page((uint64_t)addr + i, (uint64_t)phys, page_flags)) {
+                goto cleanup;
+            }
+            memset((void*)((uint64_t)addr + i), 0, PAGE_SIZE);
+        }
+    }
+
+    return addr;
+
+cleanup:
+    for (size_t i = 0; i < length; i += PAGE_SIZE) {
+        vmm_unmap_page((uint64_t)addr + i);
+    }
+    return (void*)-ENOMEM;
 }
 
 ssize_t sys_read(int fd, void* buf, size_t count) {
-    // Handle standard input
+    if (!buf) return -EINVAL;
+    if (fd < 0 || fd >= MAX_FDS || !fd_table[fd]) return -EBADF;
+
     if (fd == STDIN_FILENO) {
-        // Basic character read from serial
+        char c = serial_read_char(COM1);
         if (count > 0) {
-            ((char*)buf)[0] = serial_read_char(COM1);
+            ((char*)buf)[0] = c;
             return 1;
         }
         return 0;
     }
 
-    // Read from file system
-    if (count == 0) return 0;
+    if (fd_table[fd]->private_data) {
+        net_socket* sock = fd_table[fd]->private_data;
+        uint16_t received = count;
+        int result = net_socket_receive(sock->fd, buf, &received);
+        return result == 0 ? received : -EIO;
+    }
 
-    return ext2_read_file(fd, buf, 0, count) ? count : -1;
+    if (!ext2_read_file(fd_table[fd]->inode, buf, fd_table[fd]->offset, count)) {
+        return -EIO;
+    }
+
+    fd_table[fd]->offset += count;
+    return count;
 }
 
 ssize_t sys_write(int fd, const void* buf, size_t count) {
-    // Handle standard output/error
+    if (!buf) return -EINVAL;
+    if (fd < 0 || fd >= MAX_FDS || !fd_table[fd]) return -EBADF;
+
     if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
-        // Write each character to serial
-        const char* cbuf = (const char*)buf;
+        struct limine_framebuffer* fb = framebuffer_request.response->framebuffers[0];
+        if (!fb) return -EIO;
+
+        static uint32_t x = 0, y = 0;
+        const char* cbuf = buf;
+
         for (size_t i = 0; i < count; i++) {
-            serial_write_char(COM1, cbuf[i]);
+            if (cbuf[i] == '\n' || x >= fb->width - 8) {
+                x = 0;
+                y += 16;
+                if (y >= fb->height - 16) {
+                    memmove((void*)fb->address,
+                           (void*)(fb->address + fb->pitch * 16),
+                           fb->pitch * (fb->height - 16));
+                    y = fb->height - 16;
+                }
+                if (cbuf[i] == '\n') continue;
+            }
+            draw_char(fb, cbuf[i], x, y, 0xFFFFFF);
+            x += 8;
         }
         return count;
     }
 
-    // Write to file system
-    return ext2_write_file(fd, buf, 0, count) ? count : -1;
+    if (fd_table[fd]->private_data) {
+        net_socket* sock = fd_table[fd]->private_data;
+        return net_socket_send(sock->fd, buf, count);
+    }
+
+    if (!ext2_write_file(fd_table[fd]->inode, buf, fd_table[fd]->offset, count)) {
+        return -EIO;
+    }
+
+    fd_table[fd]->offset += count;
+    return count;
 }
 
-int sys_close(int fd) {
-    // Simple close for now
-    // In a real implementation, this would free resources
-    return 0;
-}
-
-off_t sys_lseek(int fd, off_t offset, int whence) {
-    // Placeholder implementation
-    // Would need more complex file tracking in a full implementation
-    return offset;
-}
-
-int sys_stat(const char* pathname, struct stat* statbuf) {
-    // Find the file in the filesystem
-    uint32_t root_inode = EXT2_ROOT_INO;
-    uint32_t file_inode = ext2_find_file(root_inode, pathname);
-
-    if (!file_inode) {
-        return -1;
-    }
-
-    // Get inode information
-    struct ext2_inode* inode = ext2_get_inode(file_inode);
-    if (!inode) {
-        return -1;
-    }
-
-    // Copy relevant information
-    statbuf->st_mode = inode->i_mode;
-    statbuf->st_size = inode->i_size;
-    statbuf->st_atime = inode->i_atime;
-    statbuf->st_mtime = inode->i_mtime;
-    statbuf->st_ctime = inode->i_ctime;
-
-    free(inode);
-    return 0;
-}
-
-int sys_fstat(int fd, struct stat* statbuf) {
-    // Get inode information
-    struct ext2_inode* inode = ext2_get_inode(fd);
-    if (!inode) {
-        return -1;
-    }
-
-    // Copy relevant information
-    statbuf->st_mode = inode->i_mode;
-    statbuf->st_size = inode->i_size;
-    statbuf->st_atime = inode->i_atime;
-    statbuf->st_mtime = inode->i_ctime;
-
-    free(inode);
-    return 0;
-}
-
-// Stub function for forked processes to use the saved RIP
-static void forked_process_entry(void) {
-    // Get the current process
-    process_t* current = get_current_process();
-    if (!current) {
-        // Something went wrong, just halt
-        while(1) {
-            __asm__ volatile("hlt");
-        }
-    }
-
-    // Jump to the saved instruction pointer
-    void (*entry)(void) = (void (*)(void))current->cpu_state->rip;
-    entry();
-}
-
-// Fork syscall with advanced tracking
-int sys_fork(void) {
-    process_t* current = get_current_process();
-    if (!current) {
-        return -1;
-    }
-
-    // Find a free process tracking slot
-    int slot = find_free_process_slot();
-    if (slot == -1) {
-        return -1;  // No free slots
-    }
-
-    // Create child process using a stub entry point
-    process_t* child_process = process_create(
-        forked_process_entry,  // Use stub entry point
-        current->priority,
-        current->name
-    );
-
-    if (!child_process) {
-        return -1;
-    }
-
-    // Complete copy of parent's CPU state
-    memcpy(child_process->cpu_state, current->cpu_state, sizeof(cpu_state_t));
-
-    // Restore the forked process's RIP through the stub entry point
-    // The stub will call the actual instruction pointer
-    child_process->cpu_state->rip = (uint64_t)forked_process_entry;
-
-    // Set child's return value to 0
-    child_process->cpu_state->rax = 0;
-
-    // Add to scheduler
-    scheduler_add(child_process);
-
-    // Update process tracking
-    process_tracking[slot].pid = child_process->pid;
-    process_tracking[slot].parent_pid = current->pid;
-    process_tracking[slot].proc = child_process;
-    process_tracking[slot].exited = false;
-    process_tracking[slot].status = 0;
-    process_tracking[slot].signal = 0;
-
-    return child_process->pid;
-}
-
-// Exec syscall with comprehensive argument handling
-int sys_exec(const char* path, char* const argv[], char* const envp[]) {
-    // Validate path
-    if (!path || strlen(path) >= MAX_PATH_LENGTH) {
-        return -1;
-    }
-
-    // Prepare arguments
-    exec_args_t args;
-    if (!prepare_exec_args(&args, argv, envp)) {
-        return -1;
-    }
-
-    // Find the file in the filesystem
-    uint32_t file_inode = ext2_find_file(EXT2_ROOT_INO, path);
-    if (!file_inode) {
-        return -1;
-    }
-
-    // Read the file
-    struct ext2_inode* inode = ext2_get_inode(file_inode);
-    if (!inode) {
-        return -1;
-    }
-
-    // Allocate buffer for executable
-    void* elf_data = malloc(inode->i_size);
-    if (!elf_data) {
-        free(inode);
-        return -1;
-    }
-
-    // Read file contents
-    if (!ext2_read_file(file_inode, elf_data, 0, inode->i_size)) {
-        free(elf_data);
-        free(inode);
-        return -1;
-    }
-    free(inode);
-
-    // Attempt to load ELF executable
-    uint64_t entry_point;
-    int result = elf_load_executable(elf_data, inode->i_size, &entry_point);
-    free(elf_data);
-
-    if (result != 0) {
-        return -1;
-    }
-
-    // Get current process
-    process_t* current = get_current_process();
-    if (!current) {
-        return -1;
-    }
-
-    // Update current process's instruction pointer
-    current->cpu_state->rip = entry_point;
-
-    // Setup argument and environment pointer on the stack
-    // Note: In a real implementation, this would involve more complex stack manipulation
-    current->cpu_state->rdi = (uint64_t)args.argc;  // argc in rdi
-    current->cpu_state->rsi = (uint64_t)args.argv;  // argv in rsi
-    current->cpu_state->rdx = (uint64_t)args.envp;  // envp in rdx
-
-    return 0;
-}
-
-// Exit syscall with status tracking
-void sys_exit(int status) {
-    process_t* current = get_current_process();
-    if (!current) {
-        return;
-    }
-
-    // Find process tracking info
-    process_info_t* proc_info = find_process_by_pid(current->pid);
-    if (proc_info) {
-        proc_info->exited = true;
-        proc_info->status = status;
-    }
-
-    // Mark process as terminated
-    current->state = PROCESS_STATE_TERMINATED;
-
-    // Remove from scheduler
-    scheduler_remove(current);
-
-    // Free process resources
-    process_destroy(current);
-
-    // Switch to next process
-    process_t* next = scheduler_next();
-    if (next) {
-        process_switch(next);
-    }
-}
-
-// Wait syscall with comprehensive child process tracking
-int sys_wait(int* status) {
-    process_t* current = get_current_process();
-    if (!current) {
-        return -1;
-    }
-
-    // Find child processes
-    int child_pids[MAX_PROCESSES];
-    int child_count = find_child_processes(current->pid, child_pids, MAX_PROCESSES);
-
-    if (child_count == 0) {
-        // No child processes
-        return 0;
-    }
-
-    // Find first terminated child
-    for (int i = 0; i < child_count; i++) {
-        process_info_t* child_info = find_process_by_pid(child_pids[i]);
-
-        if (child_info && child_info->exited) {
-            // If status pointer is valid, set status
-            if (status) {
-                *status = child_info->status;
-            }
-
-            // Remove process tracking entry
-            child_info->proc = NULL;
-
-            // Return PID of terminated child
-            return child_pids[i];
-        }
-    }
-
-    // No terminated children
-    return 0;
-}
-
-// Kill syscall with signal handling
-int sys_kill(int pid, int signal) {
-    process_info_t* target_info = find_process_by_pid(pid);
-    if (!target_info) {
-        return -1;
-    }
-
-    // Handle the signal
-    handle_signal(target_info, signal);
-
-    return 0;
-}
-
-// Network syscalls
-int sys_socket(int domain, int type, int protocol) {
-    // Create a network socket
-    int sock_fd = net_socket_create(
-        type == 1 ? SOCKET_TCP :  // SOCK_STREAM
-        type == 2 ? SOCKET_UDP :  // SOCK_DGRAM
-        SOCKET_RAW
-    );
-
-    return sock_fd;
-}
-
-int sys_connect(int sockfd, uint32_t ip, uint16_t port) {
-    // Connect to a network endpoint
-    return net_socket_connect(sockfd, ip, port);
-}
-
-ssize_t sys_send(int sockfd, const void* buf, size_t len, int flags) {
-    // Send data over socket
-    return net_socket_send(sockfd, buf, len);
-}
-
-ssize_t sys_recv(int sockfd, void* buf, size_t len, int flags) {
-    uint16_t recv_len = len;
-    int result = net_socket_receive(sockfd, buf, &recv_len);
-    return result == 0 ? recv_len : -1;
-}
-
-// Central syscall handler
 long syscall_handler(long syscall_num,
-                     uint64_t arg1,
-                     uint64_t arg2,
-                     uint64_t arg3,
-                     uint64_t arg4,
-                     uint64_t arg5,
-                     uint64_t arg6) {
+                    uint64_t arg1,
+                    uint64_t arg2,
+                    uint64_t arg3,
+                    uint64_t arg4,
+                    uint64_t arg5,
+                    uint64_t arg6) {
     switch (syscall_num) {
-        // File operations
         case SYS_read:
             return sys_read((int)arg1, (void*)arg2, (size_t)arg3);
         case SYS_write:
@@ -526,36 +345,26 @@ long syscall_handler(long syscall_num,
             return sys_close((int)arg1);
         case SYS_lseek:
             return sys_lseek((int)arg1, (off_t)arg2, (int)arg3);
-        case SYS_stat:
-            return sys_stat((const char*)arg1, (struct stat*)arg2);
-        case SYS_fstat:
-            return sys_fstat((int)arg1, (struct stat*)arg2);
-
-        // Process management
         case SYS_fork:
             return sys_fork();
-        case SYS_exec:
-            return sys_exec((const char*)arg1, (char* const*)arg2, (char* const*)arg3);
         case SYS_exit:
             sys_exit((int)arg1);
             return 0;
-        case SYS_wait:
-            return sys_wait((int*)arg1);
-        case SYS_kill:
-            return sys_kill((int)arg1, (int)arg2);
-
-        // Network operations
+        case SYS_execve:
+            return sys_execve((const char*)arg1, (char* const*)arg2, (char* const*)arg3);
+        case SYS_brk:
+            return (long)sys_brk((void*)arg1);
         case SYS_socket:
             return sys_socket((int)arg1, (int)arg2, (int)arg3);
         case SYS_connect:
-            return sys_connect((int)arg1, (uint32_t)arg2, (uint16_t)arg3);
+            return sys_connect((int)arg1, (const struct sockaddr*)arg2, (uint32_t)arg3);
         case SYS_send:
             return sys_send((int)arg1, (const void*)arg2, (size_t)arg3, (int)arg4);
         case SYS_recv:
             return sys_recv((int)arg1, (void*)arg2, (size_t)arg3, (int)arg4);
-
+        case SYS_mmap:
+            return (long)sys_mmap((void*)arg1, (size_t)arg2, (int)arg3, (int)arg4, (int)arg5, (off_t)arg6);
         default:
-            // Unsupported syscall
-            return -1;
+            return -ENOSYS;
     }
 }
