@@ -334,6 +334,25 @@ int sys_pipe(int pipefd[2]) {
     return 0;
 }
 
+int sys_pipe2(int pipefd[2], int flags) {
+    int ret = sys_pipe(pipefd);
+    if (ret < 0) return ret;
+
+    if (flags & O_NONBLOCK) {
+        // Set non-blocking mode on both fds
+        fd_table[pipefd[0]]->flags |= O_NONBLOCK;
+        fd_table[pipefd[1]]->flags |= O_NONBLOCK;
+    }
+
+    if (flags & O_CLOEXEC) {
+        // Set close-on-exec flag on both fds
+        fd_table[pipefd[0]]->flags |= O_CLOEXEC;
+        fd_table[pipefd[1]]->flags |= O_CLOEXEC;
+    }
+
+    return 0;
+}
+
 int sys_dup(int oldfd) {
     if (oldfd < 0 || oldfd >= MAX_FDS || !fd_table[oldfd]) return -EBADF;
 
@@ -757,6 +776,8 @@ long syscall_handler(long syscall_num,
             return sys_getpid();
         case __NR_getppid:
             return sys_getppid();
+        case __NR_pipe2:
+            return sys_pipe2((int*)arg1, (int)arg2);
 
         // Default case
         default:

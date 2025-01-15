@@ -84,6 +84,8 @@ typedef uint16_t in_port_t;
 #define __NR_getdents    78
 #define __NR_getpid      39
 #define __NR_getppid     110
+#define __NR_pipe        22
+#define __NR_pipe2       293
 
 // File-related flags
 #define O_RDONLY             00
@@ -96,6 +98,7 @@ typedef uint16_t in_port_t;
 #define O_APPEND          02000
 #define O_NONBLOCK        04000
 #define O_DIRECTORY     0200000
+#define O_CLOEXEC      02000000
 
 // Access mode flags
 #define F_OK    0   // Test for existence
