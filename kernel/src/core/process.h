@@ -39,6 +39,8 @@ typedef struct cpu_state {
     uint64_t rsp, ss;
 } __attribute__((packed)) cpu_state_t;
 
+extern process_t* process_list;
+
 // Function declarations
 void process_init(void);
 process_t *process_create(void (*entry)(void), uint32_t priority, const char *name);

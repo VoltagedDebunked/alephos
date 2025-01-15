@@ -9,7 +9,7 @@
 #define STACK_SIZE    16384  // 16KB stack
 
 static process_t *current_process = NULL;
-static process_t *process_list = NULL;
+process_t *process_list = NULL;
 static uint32_t next_pid = 1;
 static uint32_t process_count = 0;
 
