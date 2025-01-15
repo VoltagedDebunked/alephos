@@ -25,8 +25,6 @@
 - [ ] Ring 3
 - [x] Syscalls
 - [x] FS (EXT2)
-- [ ] FS (ISO9660)
-- [ ] VFS
 - [x] Heap
 - [x] Framebuffer
 - [x] Text Rendering
