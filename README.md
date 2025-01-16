@@ -37,7 +37,7 @@
 - [ ] BASH Port
 - [ ] Ported Apps
 - [x] TCP/IP Stack
-- [ ] DNS Resolution
+- [x] DNS Resolution
 - [x] NIC Driver
 - [ ] Ported Standard C Library
 - [x] ELF Loading and execution
@@ -51,8 +51,6 @@
 - [x] ACPI
 - [x] NVMe Support
 - [x] Process Scheduler & Manager
-- [ ] Cooperative Tasks
-- [ ] Preemptive Multitasking
 - [x] TTY Support
 - [x] Pipe Support
 - [x] Time Management

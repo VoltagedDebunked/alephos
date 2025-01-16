@@ -2,6 +2,7 @@
 #include <core/drivers/net/ip.h>
 #include <core/drivers/pci.h>
 #include <utils/mem.h>
+#include <net/dns.h>
 #include <utils/str.h>
 
 // Internal data structures
@@ -385,16 +386,25 @@ int net_send_packet(net_packet* packet) {
 }
 
 int net_receive_packet(net_packet* packet) {
-    // Use IP layer to receive packet
+    if (!packet) {
+        return -1;
+    }
+
+    // Use a buffer size that fits within uint16_t
     uint8_t buffer[NET_MAX_PACKET_SIZE];
-    uint16_t length = sizeof(buffer);
+    uint16_t length = NET_MAX_PACKET_SIZE > UINT16_MAX ? UINT16_MAX : (uint16_t)NET_MAX_PACKET_SIZE;
 
+    // Use IP layer to receive packet
     int result = ip_receive_packet(buffer, length);
-    if (result < 0) return -1;
+    if (result < 0) {
+        return -1;
+    }
 
-    // Allocate packet data
+    // Only allocate as much as was actually received
     packet->data = malloc(length);
-    if (!packet->data) return -1;
+    if (!packet->data) {
+        return -1;
+    }
 
     memcpy(packet->data, buffer, length);
     packet->length = length;
