@@ -55,6 +55,7 @@
 #include <net/http/http.h>
 #include <net/http/https.h>
 #include <net/dns.h>
+#include <net/wifi.h>
 
 // Filesystem
 #include <fs/ext2.h>
@@ -209,6 +210,8 @@ void kmain(void) {
     tls_init();
 
     dns_init();
+
+    wifi_init();
 
     // Initialize filesystems (EXT2, etc.)
     ext2_init(0);
