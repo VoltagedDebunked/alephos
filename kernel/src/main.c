@@ -310,7 +310,6 @@ void kmain(void) {
 
     // Main kernel loop
     while (1) {
-        log_debug("Kernel Idle Loop");
         // Add any periodic kernel maintenance tasks here
     }
 
