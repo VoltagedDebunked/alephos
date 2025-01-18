@@ -5,6 +5,7 @@
 #include <fs/ext2.h>
 #include <core/process.h>
 #include <core/elf.h>
+#include <utils/log.h>
 #include <core/acpi.h>
 #include <core/drivers/pic.h>
 #include <core/drivers/lapic.h>
@@ -47,6 +48,13 @@ typedef struct {
     size_t data_size;
 } pipe_t;
 
+static file_descriptor_t* fd_table[MAX_FDS];
+static void* program_break = NULL;
+static void* next_mmap_addr = (void*)0x600000000000ULL;
+
+// Existing method declarations
+extern process_t* process_list;
+
 // Dirent structure for getdents syscall
 struct linux_dirent {
     unsigned long  d_ino;     // Inode number
@@ -55,12 +63,64 @@ struct linux_dirent {
     char           d_name[];  // Filename (null-terminated)
 } __attribute__((packed));
 
-static file_descriptor_t* fd_table[MAX_FDS];
-static void* program_break = NULL;
-static void* next_mmap_addr = (void*)0x600000000000ULL;
+#define MSR_EFER        0xC0000080  // Extended Feature Enable Register
+#define MSR_STAR        0xC0000081  // System Call Target Address Register
+#define MSR_LSTAR       0xC0000082  // Long Mode System Call Target Register
+#define MSR_CSTAR       0xC0000083  // Compatibility Mode System Call Target Register
+#define MSR_SYSCALL_MASK 0xC0000084 // System Call Flag Mask
+#define EFER_SCE        0x00000001  // System Call Extensions bit
 
-// Existing method declarations
-extern process_t* process_list;
+// Read MSR
+static inline uint64_t rdmsr(uint32_t msr) {
+    uint32_t low, high;
+    asm volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
+    return ((uint64_t)high << 32) | low;
+}
+
+// Write MSR
+static inline void wrmsr(uint32_t msr, uint64_t value) {
+    uint32_t low = value & 0xFFFFFFFF;
+    uint32_t high = value >> 32;
+    asm volatile("wrmsr" : : "c"(msr), "a"(low), "d"(high));
+}
+
+// Assembly syscall entry point
+extern void syscall_entry(void);
+
+void syscalls_init(void) {
+    // Enable System Call Extensions (SCE) in EFER MSR
+    uint64_t efer = rdmsr(MSR_EFER);
+    efer |= EFER_SCE;
+    wrmsr(MSR_EFER, efer);
+
+    // Set up segment selectors for SYSCALL/SYSRET
+    uint64_t star = 0;
+    star |= ((uint64_t)0x08 << 32);           // SYSCALL CS/SS: kernel code (0x08)
+    star |= ((uint64_t)0x1B << 48);           // SYSRET CS/SS: user code (0x1B)
+    wrmsr(MSR_STAR, star);
+
+    // Set up syscall entry point
+    wrmsr(MSR_LSTAR, (uint64_t)syscall_entry);
+
+    // Set up syscall flags mask
+    // Clear interrupt flag, trap flag, and direction flag during syscall
+    uint64_t syscall_mask = 0;
+    syscall_mask |= (1 << 9);    // IF (Interrupt Flag)
+    syscall_mask |= (1 << 8);    // TF (Trap Flag)
+    syscall_mask |= (1 << 10);   // DF (Direction Flag)
+    wrmsr(MSR_SYSCALL_MASK, syscall_mask);
+
+    // Verify syscall configuration
+    uint64_t verify_efer = rdmsr(MSR_EFER);
+    if (!(verify_efer & EFER_SCE)) {
+        // Handle error - syscall not properly enabled
+        log_error("Failed to enable system calls");
+        return;
+    }
+
+    // Initialize the file descriptor table
+    memset(fd_table, 0, sizeof(fd_table));
+}
 
 // File descriptor management
 static int alloc_fd(void) {

@@ -58,6 +58,8 @@
 - [x] RTC Driver (inside FS)
 - [x] RTC Driver (outside FS)
 - [x] STD I/O
+- [ ] HD Sound Drivers
+- [ ] PC Speaker
 
 That's all for now, maybe i'll expand it later, or complete more stuff.
 

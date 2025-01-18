@@ -4,6 +4,7 @@
 #include <utils/str.h>
 #include <core/drivers/storage/nvme.h>
 #include <utils/io.h>
+#include <core/syscalls.h>
 
 // Base timestamp (initialized at mount time)
 static uint32_t base_time = 0;
@@ -356,6 +357,280 @@ bool ext2_write_block(uint32_t block_num, const void* buffer) {
     return write_blocks(block_num, 1, buffer);
 }
 
+// Allocate a new inode from the bitmap
+uint32_t ext2_allocate_inode(void) {
+    if (!ext2_instance) return 0;
+
+    // Search through each block group
+    for (uint32_t group = 0; group < ext2_instance->groups_count; group++) {
+        struct ext2_group_desc* desc = &ext2_instance->group_desc[group];
+        if (desc->bg_free_inodes_count == 0) continue;
+
+        // Read inode bitmap
+        void* bitmap = malloc(ext2_instance->block_size);
+        if (!bitmap) return 0;
+
+        if (!ext2_read_block(desc->bg_inode_bitmap, bitmap)) {
+            free(bitmap);
+            continue;
+        }
+
+        // Find first free bit
+        for (uint32_t bit = 0; bit < ext2_instance->superblock->s_inodes_per_group; bit++) {
+            uint32_t byte_offset = bit / 8;
+            uint8_t bit_offset = bit % 8;
+
+            if (!(((uint8_t*)bitmap)[byte_offset] & (1 << bit_offset))) {
+                // Found free inode
+                ((uint8_t*)bitmap)[byte_offset] |= (1 << bit_offset);
+
+                // Write bitmap back
+                if (ext2_write_block(desc->bg_inode_bitmap, bitmap)) {
+                    // Update superblock and group descriptor
+                    desc->bg_free_inodes_count--;
+                    ext2_instance->superblock->s_free_inodes_count--;
+
+                    // Calculate inode number
+                    uint32_t inode = group * ext2_instance->superblock->s_inodes_per_group + bit + 1;
+                    free(bitmap);
+                    return inode;
+                }
+            }
+        }
+
+        free(bitmap);
+    }
+
+    return 0;  // No free inodes found
+}
+
+// Write inode data to disk
+bool ext2_write_inode(uint32_t inode_num, struct ext2_inode* inode) {
+    if (!ext2_instance || !inode || inode_num == 0) return false;
+
+    // Calculate group and index
+    uint32_t group = (inode_num - 1) / ext2_instance->superblock->s_inodes_per_group;
+    uint32_t index = (inode_num - 1) % ext2_instance->superblock->s_inodes_per_group;
+
+    // Get block containing inode
+    uint32_t block = ext2_instance->group_desc[group].bg_inode_table +
+                    (index * sizeof(struct ext2_inode)) / ext2_instance->block_size;
+    uint32_t offset = (index * sizeof(struct ext2_inode)) % ext2_instance->block_size;
+
+    // Read block
+    void* buffer = malloc(ext2_instance->block_size);
+    if (!buffer) return false;
+
+    if (!ext2_read_block(block, buffer)) {
+        free(buffer);
+        return false;
+    }
+
+    // Update inode data
+    memcpy(buffer + offset, inode, sizeof(struct ext2_inode));
+
+    // Write block back
+    bool success = ext2_write_block(block, buffer);
+    free(buffer);
+
+    return success;
+}
+
+// Write data to a file
+bool ext2_write_file(uint32_t inode_num, const void* buffer, uint32_t offset, uint32_t size) {
+    struct ext2_inode* inode = ext2_get_inode(inode_num);
+    if (!inode) return false;
+
+    // Calculate block range to write
+    uint32_t start_block = offset / ext2_instance->block_size;
+    uint32_t end_block = (offset + size - 1) / ext2_instance->block_size;
+    uint32_t start_offset = offset % ext2_instance->block_size;
+
+    // Allocate buffer for block operations
+    void* block_buffer = malloc(ext2_instance->block_size);
+    if (!block_buffer) {
+        free(inode);
+        return false;
+    }
+
+    bool success = true;
+    uint32_t bytes_written = 0;
+    const uint8_t* write_ptr = (const uint8_t*)buffer;
+
+    // Write blocks
+    for (uint32_t block = start_block; success && block <= end_block; block++) {
+        // Read existing block if partial write
+        if (block == start_block ||
+            (block == end_block && (offset + size) % ext2_instance->block_size != 0)) {
+            success = ext2_read_inode_block(inode, block, block_buffer);
+        }
+
+        if (success) {
+            uint32_t block_offset = (block == start_block) ? start_offset : 0;
+            uint32_t bytes_to_write = ext2_instance->block_size - block_offset;
+
+            if (bytes_to_write > size - bytes_written) {
+                bytes_to_write = size - bytes_written;
+            }
+
+            memcpy((uint8_t*)block_buffer + block_offset, write_ptr, bytes_to_write);
+            success = ext2_write_inode_block(inode, block, block_buffer);
+
+            write_ptr += bytes_to_write;
+            bytes_written += bytes_to_write;
+        }
+    }
+
+    // Update inode size if necessary
+    if (success && offset + size > inode->i_size) {
+        inode->i_size = offset + size;
+        success = ext2_write_inode(inode_num, inode);
+    }
+
+    free(block_buffer);
+    free(inode);
+    return success;
+}
+
+// Free an inode in the bitmap
+bool free_inode_bitmap(uint32_t inode_num) {
+    if (!ext2_instance || inode_num == 0) return false;
+
+    // Calculate group and bit offset
+    uint32_t group = (inode_num - 1) / ext2_instance->superblock->s_inodes_per_group;
+    uint32_t index = (inode_num - 1) % ext2_instance->superblock->s_inodes_per_group;
+
+    // Read bitmap block
+    void* bitmap = malloc(ext2_instance->block_size);
+    if (!bitmap) return false;
+
+    if (!ext2_read_block(ext2_instance->group_desc[group].bg_inode_bitmap, bitmap)) {
+        free(bitmap);
+        return false;
+    }
+
+    // Clear bit in bitmap
+    uint32_t byte_offset = index / 8;
+    uint8_t bit_offset = index % 8;
+    ((uint8_t*)bitmap)[byte_offset] &= ~(1 << bit_offset);
+
+    // Write bitmap back
+    bool success = ext2_write_block(ext2_instance->group_desc[group].bg_inode_bitmap, bitmap);
+    if (success) {
+        // Update counts
+        ext2_instance->group_desc[group].bg_free_inodes_count++;
+        ext2_instance->superblock->s_free_inodes_count++;
+    }
+
+    free(bitmap);
+    return success;
+}
+
+// Create a directory entry
+bool ext2_create_directory_entry(uint32_t dir_inode, const char* name,
+                               uint32_t inode_num, uint8_t type) {
+    struct ext2_inode* dir = ext2_get_inode(dir_inode);
+    if (!dir) return false;
+
+    void* block_buffer = malloc(ext2_instance->block_size);
+    if (!block_buffer) {
+        free(dir);
+        return false;
+    }
+
+    bool success = false;
+    uint32_t name_len = strlen(name);
+    uint32_t entry_size = sizeof(struct ext2_dir_entry) + name_len;
+    entry_size = (entry_size + 3) & ~3;  // Round up to 4-byte boundary
+
+    // Search for space in directory blocks
+    for (uint32_t i = 0; !success && i < dir->i_blocks; i++) {
+        if (ext2_read_inode_block(dir, i, block_buffer)) {
+            uint32_t offset = 0;
+            struct ext2_dir_entry* entry;
+
+            // Search through entries in block
+            while (offset < ext2_instance->block_size) {
+                entry = (struct ext2_dir_entry*)((uint8_t*)block_buffer + offset);
+
+                // Check if we can fit our entry here
+                if (entry->rec_len >= entry_size + ((entry->name_len + 3) & ~3)) {
+                    // Split existing entry
+                    uint32_t new_rec_len = entry->rec_len - entry_size;
+                    entry->rec_len = (entry->name_len + 8 + 3) & ~3;
+
+                    // Create new entry
+                    entry = (struct ext2_dir_entry*)((uint8_t*)block_buffer + offset + entry->rec_len);
+                    entry->inode = inode_num;
+                    entry->rec_len = new_rec_len;
+                    entry->name_len = name_len;
+                    entry->file_type = type;
+                    memcpy(entry->name, name, name_len);
+
+                    success = ext2_write_inode_block(dir, i, block_buffer);
+                    break;
+                }
+
+                offset += entry->rec_len;
+                if (offset >= ext2_instance->block_size || entry->rec_len == 0) {
+                    break;
+                }
+            }
+        }
+    }
+
+    free(block_buffer);
+    free(dir);
+    return success;
+}
+
+// Allocate a new block
+uint32_t ext2_allocate_block(void) {
+    if (!ext2_instance) return 0;
+
+    // Search through each block group
+    for (uint32_t group = 0; group < ext2_instance->groups_count; group++) {
+        struct ext2_group_desc* desc = &ext2_instance->group_desc[group];
+        if (desc->bg_free_blocks_count == 0) continue;
+
+        // Read block bitmap
+        void* bitmap = malloc(ext2_instance->block_size);
+        if (!bitmap) return 0;
+
+        if (!ext2_read_block(desc->bg_block_bitmap, bitmap)) {
+            free(bitmap);
+            continue;
+        }
+
+        // Find first free block
+        for (uint32_t bit = 0; bit < ext2_instance->superblock->s_blocks_per_group; bit++) {
+            uint32_t byte_offset = bit / 8;
+            uint8_t bit_offset = bit % 8;
+
+            if (!(((uint8_t*)bitmap)[byte_offset] & (1 << bit_offset))) {
+                // Found free block
+                ((uint8_t*)bitmap)[byte_offset] |= (1 << bit_offset);
+
+                // Write bitmap back
+                if (ext2_write_block(desc->bg_block_bitmap, bitmap)) {
+                    // Update superblock and group descriptor
+                    desc->bg_free_blocks_count--;
+                    ext2_instance->superblock->s_free_blocks_count--;
+
+                    // Calculate block number
+                    uint32_t block = group * ext2_instance->superblock->s_blocks_per_group + bit;
+                    free(bitmap);
+                    return block;
+                }
+            }
+        }
+
+        free(bitmap);
+    }
+
+    return 0;  // No free blocks found
+}
+
 bool ext2_read_inode_block(struct ext2_inode* inode, uint32_t block_num, void* buffer) {
     if (!ext2_instance || !inode || !buffer) {
         return false;
@@ -415,6 +690,50 @@ bool ext2_read_inode_block(struct ext2_inode* inode, uint32_t block_num, void* b
 
     free(block_buffer);
     return success;
+}
+
+void ext2_free_block(uint32_t block_num) {
+    if (!ext2_instance || block_num < ext2_instance->superblock->s_first_data_block ||
+        block_num >= ext2_instance->superblock->s_blocks_count) {
+        return;
+    }
+
+    // Calculate group and index
+    uint32_t group = (block_num - ext2_instance->superblock->s_first_data_block) /
+                    ext2_instance->superblock->s_blocks_per_group;
+    uint32_t index = (block_num - ext2_instance->superblock->s_first_data_block) %
+                    ext2_instance->superblock->s_blocks_per_group;
+
+    // Read block bitmap
+    void* bitmap = malloc(ext2_instance->block_size);
+    if (!bitmap) return;
+
+    if (!ext2_read_block(ext2_instance->group_desc[group].bg_block_bitmap, bitmap)) {
+        free(bitmap);
+        return;
+    }
+
+    // Clear bit in bitmap
+    uint32_t byte_offset = index / 8;
+    uint8_t bit_offset = index % 8;
+    ((uint8_t*)bitmap)[byte_offset] &= ~(1 << bit_offset);
+
+    // Write bitmap back
+    if (ext2_write_block(ext2_instance->group_desc[group].bg_block_bitmap, bitmap)) {
+        // Update superblock and group descriptor
+        ext2_instance->group_desc[group].bg_free_blocks_count++;
+        ext2_instance->superblock->s_free_blocks_count++;
+
+        // Zero out the freed block (optional but safer)
+        void* zero_block = malloc(ext2_instance->block_size);
+        if (zero_block) {
+            memset(zero_block, 0, ext2_instance->block_size);
+            ext2_write_block(block_num, zero_block);
+            free(zero_block);
+        }
+    }
+
+    free(bitmap);
 }
 
 bool ext2_write_inode_block(struct ext2_inode* inode, uint32_t block_num, const void* buffer) {

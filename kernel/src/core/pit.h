@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define PIT_FREQUENCY 1193182  // Base frequency for PIT
+#define PIT_FREQUENCY 1193180
 
 void pit_init(void);
 void pit_wait(uint32_t milliseconds);

@@ -283,4 +283,6 @@ long syscall_handler(long syscall_num,
                     uint64_t arg5,
                     uint64_t arg6);
 
+void syscalls_init(void);
+
 #endif // SYSCALLS_H

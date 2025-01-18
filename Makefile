@@ -32,6 +32,7 @@ run-x86_64: ovmf/ovmf-code-$(ARCH).fd $(IMAGE_NAME).iso
 		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-$(ARCH).fd,readonly=on \
 		-cdrom $(IMAGE_NAME).iso \
 		-usb -device usb-mouse \
+		-audiodev pa,id=audio0 -machine pcspk-audiodev=audio0 \
 		$(QEMUFLAGS)
 
 run-debug: ovmf/ovmf-code-$(ARCH).fd $(IMAGE_NAME).iso
