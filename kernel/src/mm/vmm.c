@@ -1,6 +1,7 @@
 #include <mm/vmm.h>
 #include <mm/pmm.h>
 #include <utils/mem.h>
+#include <utils/log.h>
 #include <core/attributes.h>
 #include <utils/asm.h>
 
@@ -56,29 +57,41 @@ static page_table_t* create_page_table(void) {
 #define IDENTITY_MAP_SIZE 0x100000  // First 1MB
 
 void vmm_init(void) {
-    hhdm_offset = hhdm_request.response->offset;
+    volatile struct limine_hhdm_response* hhdm = hhdm_request.response;
 
-    // Get current PML4
+    if (!hhdm_request.response || !hhdm_request.response->offset) {
+        // If either the pointer is NULL or offset is 0, we can't proceed
+        log_error("Invalid HHDM response from bootloader");
+        return;
+    }
+
+    log_info("Response address: %x", (uint64_t)hhdm_request.response);
+    log_info("Response magic0: %x", hhdm_request.response->revision);
+    log_info("Offset value: %x", hhdm_request.response->offset);
+    log_info("Size of response struct: %d", sizeof(struct limine_hhdm_response));
+    log_info("HHDM Request ID: %x", hhdm_request.id);
+    log_info("HHDM Request Revision: %x", hhdm_request.revision);
+
+    if (!hhdm) {
+        return;
+    }
+    hhdm_offset = hhdm->offset;
+
     uint64_t cr3;
     asm volatile("mov rax, cr3" : "=a"(cr3) :: "memory");
-
     current_pml4 = phys_to_virt(cr3 & ~0xFFF);
 
-    // Create new PML4
     page_table_t* new_pml4 = create_page_table();
     if (!new_pml4) {
         return;
     }
 
-    // Copy existing mappings
     memcpy(new_pml4, current_pml4, sizeof(page_table_t));
 
-    // Identity map first 1MB for hardware access
     for (uint64_t addr = 0; addr < IDENTITY_MAP_SIZE; addr += PAGE_SIZE) {
         vmm_map_page(addr, addr, PTE_PRESENT | PTE_WRITABLE);
     }
 
-    // Map kernel using Limine-provided addresses
     uint64_t kernel_virt = kernel_address_request.response->virtual_base;
     uint64_t kernel_phys = kernel_address_request.response->physical_base;
     uint64_t kernel_size = PAGE_ALIGN(kernel_address_request.response->virtual_base + 0x1000000 - kernel_virt);
@@ -87,25 +100,20 @@ void vmm_init(void) {
         vmm_map_page(kernel_virt + offset, kernel_phys + offset, PTE_PRESENT | PTE_WRITABLE);
     }
 
-    // Map the page tables themselves
     uint64_t pt_phys = virt_to_phys(new_pml4);
     uint64_t pt_virt = (uint64_t)new_pml4;
 
-    // Map the PML4 itself
     vmm_map_page(pt_virt, pt_phys, PTE_PRESENT | PTE_WRITABLE);
 
-    // Need to also map any page tables referenced by PML4
     for (int pml4_index = 0; pml4_index < 512; pml4_index++) {
         if (!(new_pml4->entries[pml4_index] & PTE_PRESENT)) {
             continue;
         }
 
-        // Map the PDPT
         uint64_t pdpt_phys = new_pml4->entries[pml4_index] & ~0xFFF;
         page_table_t* pdpt = phys_to_virt(pdpt_phys);
         vmm_map_page((uint64_t)pdpt, pdpt_phys, PTE_PRESENT | PTE_WRITABLE);
 
-        // Map the page directories
         for (int pdpt_index = 0; pdpt_index < 512; pdpt_index++) {
             if (!(pdpt->entries[pdpt_index] & PTE_PRESENT)) {
                 continue;
@@ -115,7 +123,6 @@ void vmm_init(void) {
             page_table_t* pd = phys_to_virt(pd_phys);
             vmm_map_page((uint64_t)pd, pd_phys, PTE_PRESENT | PTE_WRITABLE);
 
-            // Map the page tables
             for (int pd_index = 0; pd_index < 512; pd_index++) {
                 if (!(pd->entries[pd_index] & PTE_PRESENT)) {
                     continue;
@@ -128,7 +135,6 @@ void vmm_init(void) {
         }
     }
 
-    // Switch to new PML4
     vmm_switch_pagemap(virt_to_phys(new_pml4));
     current_pml4 = new_pml4;
 }

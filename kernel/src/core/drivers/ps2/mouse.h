@@ -5,9 +5,6 @@
 #include <stdbool.h>
 #include <core/idt.h>
 
-struct usb_device;
-void usb_mouse_init(void);
-
 // Mouse packet structure
 typedef struct {
     int8_t x_movement;

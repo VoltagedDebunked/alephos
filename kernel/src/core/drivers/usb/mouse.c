@@ -1,133 +1,229 @@
 #include <core/drivers/usb/mouse.h>
-#include <core/drivers/usb/usb.h>
-#include <core/drivers/usb/xhci.h>
 #include <utils/mem.h>
-#include <mm/heap.h>
+#include <utils/log.h>
 
-// Global USB mouse device
-static usb_mouse_device_t usb_mouse = {0};
+// HID Class-Specific Requests
+#define HID_GET_REPORT      0x01
+#define HID_GET_IDLE        0x02
+#define HID_GET_PROTOCOL    0x03
+#define HID_SET_REPORT      0x09
+#define HID_SET_IDLE        0x0A
+#define HID_SET_PROTOCOL    0x0B
 
-// Event handler for mouse events
-static usb_mouse_event_handler_t mouse_event_handler = NULL;
+// HID Descriptor Types
+#define HID_DESCRIPTOR           0x21
+#define HID_REPORT_DESCRIPTOR   0x22
 
-// Most recent mouse packet
-static usb_mouse_packet_t last_mouse_packet = {0};
+#define MAX_MICE 4  // Maximum number of connected mice
 
-// USB HID Boot Protocol Mouse Report Descriptor
-static const uint8_t usb_mouse_report_descriptor[] = {
-    0x05, 0x01,        // USAGE_PAGE (Generic Desktop)
-    0x09, 0x02,        // USAGE (Mouse)
-    0xa1, 0x01,        // COLLECTION (Application)
-    0x09, 0x01,        //   USAGE (Pointer)
-    0xa1, 0x00,        //   COLLECTION (Physical)
-    0x05, 0x09,        //     USAGE_PAGE (Button)
-    0x19, 0x01,        //     USAGE_MINIMUM (Button 1)
-    0x29, 0x03,        //     USAGE_MAXIMUM (Button 3)
-    0x15, 0x00,        //     LOGICAL_MINIMUM (0)
-    0x25, 0x01,        //     LOGICAL_MAXIMUM (1)
-    0x95, 0x03,        //     REPORT_COUNT (3)
-    0x75, 0x01,        //     REPORT_SIZE (1)
-    0x81, 0x02,        //     INPUT (Data,Var,Abs)
-    0x95, 0x01,        //     REPORT_COUNT (1)
-    0x75, 0x05,        //     REPORT_SIZE (5)
-    0x81, 0x03,        //     INPUT (Const,Var,Abs)
-    0x05, 0x01,        //     USAGE_PAGE (Generic Desktop)
-    0x09, 0x30,        //     USAGE (X)
-    0x09, 0x31,        //     USAGE (Y)
-    0x09, 0x38,        //     USAGE (Wheel)
-    0x15, 0x81,        //     LOGICAL_MINIMUM (-127)
-    0x25, 0x7f,        //     LOGICAL_MAXIMUM (127)
-    0x75, 0x08,        //     REPORT_SIZE (8)
-    0x95, 0x03,        //     REPORT_COUNT (3)
-    0x81, 0x06,        //     INPUT (Data,Var,Rel)
-    0xc0,              //   END_COLLECTION
-    0xc0               // END_COLLECTION
-};
+static struct {
+    usb_mouse_device_t devices[MAX_MICE];
+    uint8_t num_devices;
+    usb_mouse_event_handler_t event_handler;
+    bool initialized;
+} mouse_state;
 
-// Process raw USB mouse report
-static void process_mouse_report(uint8_t* report, uint16_t length) {
-    if (length < 3) return;  // Invalid report
+static bool parse_mouse_descriptor(usb_mouse_device_t* mouse) {
+    uint8_t desc[256];
+    int ret;
 
-    usb_mouse_packet_t packet = {0};
+    // Get HID descriptor
+    ret = usb_control_transfer(mouse->dev, 0x81,
+                             USB_REQ_GET_DESCRIPTOR,
+                             (HID_DESCRIPTOR << 8), mouse->interface,
+                             desc, sizeof(desc));
+    if (ret < 0) return false;
 
-    // Button states
-    packet.button_state = report[0];
-    packet.left_button = report[0] & USB_MOUSE_BUTTON_LEFT;
-    packet.right_button = report[0] & USB_MOUSE_BUTTON_RIGHT;
-    packet.middle_button = report[0] & USB_MOUSE_BUTTON_MIDDLE;
+    uint16_t report_desc_len = *(uint16_t*)(desc + 7);
 
-    // X movement (signed 8-bit relative movement)
-    packet.x_movement = (int8_t)report[1];
+    // Get report descriptor
+    ret = usb_control_transfer(mouse->dev, 0x81,
+                             USB_REQ_GET_DESCRIPTOR,
+                             (HID_REPORT_DESCRIPTOR << 8), mouse->interface,
+                             desc, report_desc_len);
+    if (ret < 0) return false;
 
-    // Y movement (signed 8-bit relative movement, inverted)
-    packet.y_movement = -(int8_t)report[2];
+    // Parse report descriptor to determine mouse capabilities
+    mouse->has_wheel = false;
+    mouse->has_pan = false;
 
-    // Optional scroll wheel (if 4th byte exists)
-    if (length >= 4) {
-        packet.scroll = (int8_t)report[3];
+    for (int i = 0; i < ret; i++) {
+        if (desc[i] == 0x09) {  // Usage
+            if (desc[i + 1] == 0x38) {  // Wheel
+                mouse->has_wheel = true;
+            } else if (desc[i + 1] == 0x37) {  // Pan
+                mouse->has_pan = true;
+            }
+        }
     }
 
-    // Store last packet
-    last_mouse_packet = packet;
-
-    // Call event handler if registered
-    if (mouse_event_handler) {
-        mouse_event_handler(&packet);
-    }
+    return true;
 }
 
-// Probe for USB mouse
+bool usb_mouse_init(void) {
+    if (mouse_state.initialized) {
+        return true;
+    }
+
+    memset(&mouse_state, 0, sizeof(mouse_state));
+    mouse_state.initialized = true;
+
+    log_info("USB Mouse driver initialized");
+    return true;
+}
+
+void usb_mouse_cleanup(void) {
+    if (!mouse_state.initialized) {
+        return;
+    }
+
+    // Clean up each mouse device
+    for (int i = 0; i < mouse_state.num_devices; i++) {
+        usb_mouse_device_t* mouse = &mouse_state.devices[i];
+        if (mouse->report_buffer) {
+            free(mouse->report_buffer);
+        }
+    }
+
+    memset(&mouse_state, 0, sizeof(mouse_state));
+}
+
 bool usb_mouse_probe(struct usb_device* dev) {
-    // Validate USB mouse device
-    if (!dev || dev->class != USB_CLASS_HID) return false;
+    if (!dev || dev->descriptor.device_class != USB_CLASS_HID ||
+        dev->config == NULL) {
+        return false;
+    }
 
-    // Check for mouse-specific protocol
-    if (dev->subclass != 1 || dev->protocol != 2) return false;
+    // Look for mouse interface
+    struct usb_interface_descriptor* intf = NULL;
+    uint8_t* ptr = (uint8_t*)dev->config;
+    uint16_t len = dev->config->total_length;
 
-    return true;
+    for (uint16_t i = 0; i < len;) {
+        struct usb_interface_descriptor* desc = (struct usb_interface_descriptor*)(ptr + i);
+
+        if (desc->type == USB_DT_INTERFACE &&
+            desc->interface_class == USB_CLASS_HID &&
+            desc->interface_protocol == 2) {  // Mouse protocol
+            intf = desc;
+            break;
+        }
+
+        i += desc->length;
+    }
+
+    return intf != NULL;
 }
 
-// Connect USB mouse device
 bool usb_mouse_connect(struct usb_device* dev) {
-    // Validate device
-    if (!usb_mouse_probe(dev)) return false;
+    if (!mouse_state.initialized || mouse_state.num_devices >= MAX_MICE ||
+        !usb_mouse_probe(dev)) {
+        return false;
+    }
 
-    // Configure device
-    usb_mouse.device_address = dev->address;
-    usb_mouse.max_packet_size = dev->max_packet_size;
-    usb_mouse.connected = true;
+    usb_mouse_device_t* mouse = &mouse_state.devices[mouse_state.num_devices];
+    memset(mouse, 0, sizeof(usb_mouse_device_t));
 
+    mouse->dev = dev;
+
+    // Find HID interface and endpoints
+    uint8_t* ptr = (uint8_t*)dev->config;
+    uint16_t len = dev->config->total_length;
+
+    for (uint16_t i = 0; i < len;) {
+        uint8_t desc_type = ptr[i + 1];
+        uint8_t desc_len = ptr[i];
+
+        if (desc_type == USB_DT_INTERFACE) {
+            struct usb_interface_descriptor* intf = (struct usb_interface_descriptor*)(ptr + i);
+            if (intf->interface_class == USB_CLASS_HID &&
+                intf->interface_protocol == 2) {
+                mouse->interface = intf->interface_number;
+            }
+        } else if (desc_type == USB_DT_ENDPOINT) {
+            struct usb_endpoint_descriptor* ep = (struct usb_endpoint_descriptor*)(ptr + i);
+            if ((ep->endpoint_address & 0x80) &&  // IN endpoint
+                (ep->attributes & 0x03) == 3) {   // Interrupt transfer
+                mouse->in_endpoint = ep->endpoint_address;
+                mouse->max_packet_size = ep->max_packet_size;
+            }
+        }
+
+        i += desc_len;
+    }
+
+    // Parse HID descriptors
+    if (!parse_mouse_descriptor(mouse)) {
+        return false;
+    }
+
+    // Allocate report buffer
+    mouse->report_buffer = malloc(mouse->max_packet_size);
+    if (!mouse->report_buffer) {
+        return false;
+    }
+
+    // Set boot protocol
+    if (usb_control_transfer(dev, 0x21, HID_SET_PROTOCOL,
+                           USB_HID_MOUSE_PROTOCOL_BOOT, mouse->interface,
+                           NULL, 0) < 0) {
+        free(mouse->report_buffer);
+        return false;
+    }
+
+    mouse_state.num_devices++;
+    log_info("USB Mouse connected");
     return true;
 }
 
-// Disconnect USB mouse device
 void usb_mouse_disconnect(struct usb_device* dev) {
-    if (dev->address == usb_mouse.device_address) {
-        memset(&usb_mouse, 0, sizeof(usb_mouse_device_t));
+    for (int i = 0; i < mouse_state.num_devices; i++) {
+        if (mouse_state.devices[i].dev == dev) {
+            if (mouse_state.devices[i].report_buffer) {
+                free(mouse_state.devices[i].report_buffer);
+            }
+
+            // Shift remaining devices
+            if (i < mouse_state.num_devices - 1) {
+                memmove(&mouse_state.devices[i],
+                       &mouse_state.devices[i + 1],
+                       (mouse_state.num_devices - i - 1) * sizeof(usb_mouse_device_t));
+            }
+
+            mouse_state.num_devices--;
+            log_info("USB Mouse disconnected");
+            break;
+        }
     }
 }
 
-// USB mouse initialization
-void usb_mouse_init(void) {
-    // Ensure USB stack is initialized
-    usb_init();
+void usb_mouse_register_handler(usb_mouse_event_handler_t handler) {
+    mouse_state.event_handler = handler;
 }
 
-// Check if USB mouse is available
-bool usb_mouse_available(void) {
-    return usb_mouse.connected;
-}
+void usb_mouse_process_events(void) {
+    if (!mouse_state.initialized || !mouse_state.event_handler) {
+        return;
+    }
 
-// Read most recent mouse packet
-bool usb_mouse_read_packet(usb_mouse_packet_t* packet) {
-    if (!usb_mouse.connected || !packet) return false;
+    for (int i = 0; i < mouse_state.num_devices; i++) {
+        usb_mouse_device_t* mouse = &mouse_state.devices[i];
+        uint16_t length = mouse->max_packet_size;
 
-    // Copy last packet
-    memcpy(packet, &last_mouse_packet, sizeof(usb_mouse_packet_t));
-    return true;
-}
+        if (usb_interrupt_transfer(mouse->dev, mouse->in_endpoint,
+                                mouse->report_buffer, length, 0) == 0) {
+            usb_mouse_report_t* report = mouse->report_buffer;
+            usb_mouse_event_t event;
 
-// Register mouse event handler
-void usb_mouse_register_event_handler(usb_mouse_event_handler_t handler) {
-    mouse_event_handler = handler;
+            event.left_button = report->buttons & USB_HID_MOUSE_BUTTON_LEFT;
+            event.right_button = report->buttons & USB_HID_MOUSE_BUTTON_RIGHT;
+            event.middle_button = report->buttons & USB_HID_MOUSE_BUTTON_MIDDLE;
+            event.rel_x = report->x;
+            event.rel_y = report->y;
+            event.wheel_delta = mouse->has_wheel ? report->wheel : 0;
+            event.pan_delta = mouse->has_pan ? report->pan : 0;
+
+            mouse_state.event_handler(&event);
+        }
+    }
 }
