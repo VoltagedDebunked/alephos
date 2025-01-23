@@ -52,7 +52,7 @@ extern void* isr_stub_table[];
 
 void idt_set_descriptor(uint8_t vector, void* isr, uint8_t flags, uint8_t ist) {
     uint64_t base = (uint64_t)isr;
-    
+
     idt[vector].base_low = base & 0xFFFF;
     idt[vector].selector = 0x08;  // Kernel code segment
     idt[vector].ist = ist & 0x7;  // Only values 0-7 are valid
@@ -74,21 +74,21 @@ void idt_init(void) {
     }
 
     // Set up special exception handlers with IST
-    idt_set_descriptor(INT_DEBUG, isr_stub_table[INT_DEBUG], 
+    idt_set_descriptor(INT_DEBUG, isr_stub_table[INT_DEBUG],
                       IDT_GATE_INTERRUPT, IST_DEBUG);
-    
+
     idt_set_descriptor(INT_NMI, isr_stub_table[INT_NMI],
                       IDT_GATE_INTERRUPT, IST_NMI);
-    
+
     idt_set_descriptor(INT_DOUBLE_FAULT, isr_stub_table[INT_DOUBLE_FAULT],
                       IDT_GATE_INTERRUPT, IST_DOUBLE_FAULT);
-    
+
     idt_set_descriptor(INT_MACHINE_CHECK, isr_stub_table[INT_MACHINE_CHECK],
                       IDT_GATE_INTERRUPT, IST_MCE);
-    
+
     idt_set_descriptor(INT_STACK_FAULT, isr_stub_table[INT_STACK_FAULT],
                       IDT_GATE_INTERRUPT, IST_STACK_FAULT);
-                      
+
     idt_set_descriptor(INT_GENERAL_PROTECTION, isr_stub_table[INT_GENERAL_PROTECTION],
                       IDT_GATE_INTERRUPT, IST_GPF);
 
@@ -118,7 +118,7 @@ const char* get_exception_name(uint8_t vector) {
 // This is called from our ASM interrupt handler stubs
 void exception_handler_common(struct interrupt_frame_error* frame) {
     uint64_t vector = frame->error_code >> 3;  // Error code contains the vector in our setup
-    
+
     // Handle CPU exceptions (vectors 0-31)
     if (vector < 32) {
         if (exception_handlers[vector]) {
@@ -126,13 +126,13 @@ void exception_handler_common(struct interrupt_frame_error* frame) {
         } else {
             // Default exception handler
             cli();  // Disable interrupts
-            
+
             // Get CR2 for page faults
             uint64_t cr2 = 0;
             if (vector == INT_PAGE_FAULT) {
                 asm volatile("mov %%cr2, %0" : "=r"(cr2));
             }
-            
+
             // TODO: Add proper display/logging of exception information
             // For now, just halt
             hlt();

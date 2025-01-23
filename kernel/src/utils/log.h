@@ -13,6 +13,13 @@ typedef enum {
     LOG_LEVEL_FATAL
 } log_level_t;
 
+struct log_state {
+    uint32_t cursor_x;
+    uint32_t cursor_y;
+    uint32_t width;
+    uint32_t height;
+};
+
 // Initialize logging system
 void log_init(void);
 

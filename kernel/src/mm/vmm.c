@@ -5,6 +5,8 @@
 #include <core/attributes.h>
 #include <utils/asm.h>
 
+extern void kmain();
+
 extern volatile struct limine_hhdm_request hhdm_request;
 extern volatile struct limine_kernel_address_request kernel_address_request;
 
@@ -64,13 +66,6 @@ void vmm_init(void) {
         log_error("Invalid HHDM response from bootloader");
         return;
     }
-
-    log_info("Response address: %x", (uint64_t)hhdm_request.response);
-    log_info("Response magic0: %x", hhdm_request.response->revision);
-    log_info("Offset value: %x", hhdm_request.response->offset);
-    log_info("Size of response struct: %d", sizeof(struct limine_hhdm_response));
-    log_info("HHDM Request ID: %x", hhdm_request.id);
-    log_info("HHDM Request Revision: %x", hhdm_request.revision);
 
     if (!hhdm) {
         return;

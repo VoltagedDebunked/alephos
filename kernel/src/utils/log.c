@@ -3,7 +3,6 @@
 #include <stdarg.h>
 #include <utils/str.h>
 
-// Level prefixes
 static const char* level_strings[] = {
     [LOG_LEVEL_DEBUG] = "[DEBUG] ",
     [LOG_LEVEL_INFO] = "[INFO] ",
@@ -25,6 +24,7 @@ static void write_serial(const char* str) {
 void log_char(log_level_t level, char c) {
     write_serial(level_strings[level]);
     serial_write_char(COM1, c);
+    serial_write_char(COM1, '\r');
     serial_write_char(COM1, '\n');
 }
 
@@ -32,7 +32,10 @@ void log_string(log_level_t level, const char* str) {
     write_serial(level_strings[level]);
     write_serial(str);
     if (str[strlen(str) - 1] != '\n') {
+        serial_write_char(COM1, '\r');
         serial_write_char(COM1, '\n');
+    } else {
+        serial_write_char(COM1, '\r');
     }
 }
 
@@ -54,6 +57,7 @@ void log_hex(log_level_t level, uint64_t value) {
     write_serial(level_strings[level]);
     write_serial("0x");
     print_num(value, 16);
+    serial_write_char(COM1, '\r');
     serial_write_char(COM1, '\n');
 }
 

@@ -1,6 +1,9 @@
 #include <limine.h>
 
 __attribute__((section(".limine_requests")))
+static LIMINE_BASE_REVISION(0);
+
+__attribute__((section(".limine_requests")))
 volatile struct limine_framebuffer_request framebuffer_request = {
     .id = LIMINE_FRAMEBUFFER_REQUEST,
     .revision = 0

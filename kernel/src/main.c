@@ -173,6 +173,7 @@ void kmain(void) {
     // Enable interrupts
     log_debug("Enabling Interrupts");
     sti();
+    log_debug("Enabled Interrupts");
 
     pic_init();
     log_info("PIC Initialized");

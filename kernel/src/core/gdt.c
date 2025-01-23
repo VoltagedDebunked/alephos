@@ -18,20 +18,20 @@ static void gdt_set_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t acc
 
 static void gdt_set_tss(uint32_t num, uint64_t base, uint32_t limit) {
     struct gdt_tss_entry* tss_entry = (struct gdt_tss_entry*)&gdt_entries[num];
-    
+
     // Set base address
     tss_entry->base_low = base & 0xFFFF;
     tss_entry->base_middle = (base >> 16) & 0xFF;
     tss_entry->base_high = (base >> 24) & 0xFF;
     tss_entry->base_upper = (base >> 32) & 0xFFFFFFFF;
-    
+
     // Set limit
     tss_entry->length = limit;
-    
+
     // Set flags
     tss_entry->flags = 0x89;        // Present, DPL=0, Type=TSS Available
     tss_entry->granularity = 0x0;   // No granularity for TSS
-    
+
     tss_entry->reserved = 0;
 }
 
@@ -44,7 +44,7 @@ void gdt_init(void) {
     for (int i = 0; i < sizeof(tss); i++) {
         ((uint8_t*)&tss)[i] = 0;
     }
-    
+
     // Set up stack pointers in TSS
     // RSP0 is set later via gdt_load_tss
     tss.ist1 = 0x50000;  // Debug stack
@@ -64,16 +64,6 @@ void gdt_init(void) {
     // Kernel mode data segment
     gdt_set_gate(2, 0, 0xFFFFFFFF,
         GDT_PRESENT | GDT_DESCRIPTOR | GDT_READWRITE,
-        GDT_GRANULARITY | GDT_SIZE_64);
-
-    // User mode code segment
-    gdt_set_gate(3, 0, 0xFFFFFFFF,
-        GDT_PRESENT | GDT_DPL_RING3 | GDT_DESCRIPTOR | GDT_EXECUTABLE | GDT_READWRITE,
-        GDT_GRANULARITY | GDT_SIZE_64);
-
-    // User mode data segment
-    gdt_set_gate(4, 0, 0xFFFFFFFF,
-        GDT_PRESENT | GDT_DPL_RING3 | GDT_DESCRIPTOR | GDT_READWRITE,
         GDT_GRANULARITY | GDT_SIZE_64);
 
     // TSS entries (we need two entries for x86_64 TSS)
