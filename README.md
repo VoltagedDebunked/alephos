@@ -39,7 +39,7 @@
 - [x] TCP/IP Stack
 - [x] DNS Resolution
 - [x] NIC Driver
-- [x] Wifi Support
+- [x] Wi-Fi Support
 - [ ] Ported Standard C Library
 - [x] ELF Loading and execution
 - [x] HTTPS Support
